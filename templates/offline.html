@@ -1,1 +1,10 @@
-{% extends 'base.html' %}{% block title %}Sin conexión · Floki Manager{% endblock %}{% block content %}<section class="empty-state card"><div class="status-orb"></div><h1>Sin conexión con Floki Manager</h1><p class="muted">Conectá el celular a la misma red Wi‑Fi que la computadora donde está funcionando el sistema.</p></section>{% endblock %}
+{% extends 'base.html' %}
+{% block title %}Sin conexión · Floki Manager{% endblock %}
+{% block content %}
+<section class="empty-state card">
+  <div class="status-orb"></div>
+  <h1>Sin conexión</h1>
+  <p class="muted">Podés continuar con las operaciones rápidas que hayan sido preparadas previamente en este dispositivo.</p>
+  <a class="primary-button" href="{{ url_for('offline_operations_page') }}">Abrir modo operativo offline</a>
+</section>
+{% endblock %}

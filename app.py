@@ -1,5 +1,6 @@
 import csv
 import io
+import json
 import os
 import re
 import secrets
@@ -66,7 +67,7 @@ DATA_DIR = BASE_DIR / "data"
 BACKUP_DIR = BASE_DIR / "backups"
 DATABASE = DATA_DIR / "floki.db"
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
-APP_VERSION = "2.5.1"
+APP_VERSION = "2.6.0"
 
 PAYMENT_METHODS = {"cash", "mercadopago", "transfer", "debit", "credit", "other"}
 # Las categorías advance/vip se conservan únicamente para leer eventos históricos.
@@ -175,7 +176,8 @@ def add_security_headers(response):
     response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
     response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
     response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
-    if session.get("user_id") or request.path.startswith(("/api/", "/history", "/stock", "/promoter")):
+    offline_shell = request.path in {"/offline", "/offline-operations", "/service-worker.js", "/manifest.webmanifest"} or request.path.startswith("/static/")
+    if not offline_shell and (session.get("user_id") or request.path.startswith(("/api/", "/history", "/stock", "/promoter"))):
         response.headers["Cache-Control"] = "no-store, private"
     return response
 
@@ -762,12 +764,30 @@ def init_db():
                 FOREIGN KEY(beverage_product_id) REFERENCES beverage_products(id)
             );
 
+            CREATE TABLE IF NOT EXISTS offline_operations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                operation_id TEXT NOT NULL UNIQUE,
+                cash_session_id INTEGER NOT NULL,
+                operation_type TEXT NOT NULL,
+                payload_json TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending',
+                result_json TEXT,
+                client_created_at TEXT NOT NULL,
+                synced_at TEXT NOT NULL,
+                created_by INTEGER NOT NULL,
+                device_id TEXT NOT NULL,
+                FOREIGN KEY(cash_session_id) REFERENCES cash_sessions(id),
+                FOREIGN KEY(created_by) REFERENCES users(id)
+            );
+
             CREATE INDEX IF NOT EXISTS idx_movements_session ON movements(cash_session_id);
             CREATE INDEX IF NOT EXISTS idx_movements_created_at ON movements(created_at);
             CREATE INDEX IF NOT EXISTS idx_promoter_guests_session ON promoter_guests(cash_session_id);
             CREATE INDEX IF NOT EXISTS idx_promoter_guests_normalized ON promoter_guests(cash_session_id, normalized_name);
             CREATE INDEX IF NOT EXISTS idx_guest_checkins_session ON guest_checkins(cash_session_id);
             CREATE INDEX IF NOT EXISTS idx_beverage_stock_session ON beverage_stock(cash_session_id);
+            CREATE INDEX IF NOT EXISTS idx_offline_operations_session ON offline_operations(cash_session_id);
+            CREATE INDEX IF NOT EXISTS idx_offline_operations_device ON offline_operations(device_id, status);
             """
         )
 
@@ -1421,6 +1441,147 @@ def register_sale():
     return redirect(url_for("dashboard"))
 
 
+def operation_datetime(value=None, epoch_ms=None):
+    """Normaliza la hora de la operación usando el reloj de servidor guardado por la PWA."""
+    now_value = datetime.now().replace(microsecond=0)
+    if epoch_ms not in (None, ""):
+        try:
+            parsed_epoch = datetime.fromtimestamp(float(epoch_ms) / 1000).replace(microsecond=0)
+            if abs((now_value - parsed_epoch).total_seconds()) <= 7 * 24 * 60 * 60:
+                return parsed_epoch
+        except (TypeError, ValueError, OSError, OverflowError):
+            pass
+    if not value:
+        return now_value
+    text = str(value).strip().replace("T", " ").replace("Z", "")[:19]
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return now_value
+    delta_seconds = abs((now_value - parsed).total_seconds())
+    return parsed if delta_seconds <= 7 * 24 * 60 * 60 else now_value
+
+
+def operation_time_iso(value=None, epoch_ms=None):
+    return operation_datetime(value, epoch_ms).isoformat(sep=" ")
+
+
+def perform_quick_sale(db, cash, user, payload, *, created_at=None):
+    """Registra una venta desde web u offline usando una única validación de negocio."""
+    sale_kind = str(payload.get("sale_kind", "entry"))
+    if user["role"] != "admin":
+        sector = user["sector"] or "ticketing"
+        allowed = {
+            "ticketing": {"entry", "ticketing_product"},
+            "beverages": {"beverage", "special_beverage", "rrpp_benefit", "birthday_discount"},
+        }
+        if sale_kind not in allowed.get(sector, set()):
+            raise PermissionError("Tu usuario no tiene acceso a esa operación")
+
+    quantity = positive_int(payload.get("quantity", "1"), "La cantidad", maximum=100)
+    payment_method = str(payload.get("payment_method", "cash"))
+    if payment_method not in PAYMENT_METHODS:
+        raise ValueError("Medio de pago inválido")
+
+    promoter_id = None
+    beverage_product_id = None
+    stock_units = 0.0
+    product = None
+    operation_dt = operation_datetime(created_at)
+
+    if sale_kind == "entry":
+        category = str(payload.get("category", "general"))
+        row = db.execute("SELECT * FROM entry_prices WHERE category=? AND active=1", (category,)).fetchone()
+        if not row or category != "general":
+            raise ValueError("Solo está habilitada la entrada general. La entrada FREE se confirma desde Listas RRPP")
+        unit_price, phase = resolve_entry_price(row, operation_dt)
+        description = f"{row['label']} · {phase}"
+        promoter_value = str(payload.get("promoter_id", "")).strip()
+        promoter_id = int(promoter_value) if promoter_value else None
+        if promoter_id and not db.execute("SELECT id FROM promoters WHERE id=? AND active=1", (promoter_id,)).fetchone():
+            raise ValueError("Promotor inválido")
+    elif sale_kind in {"beverage", "special_beverage", "rrpp_benefit", "birthday_discount"}:
+        product_id = positive_int(payload.get("beverage_id"), "La bebida", maximum=100000)
+        product = db.execute("SELECT * FROM beverage_products WHERE id=? AND active=1", (product_id,)).fetchone()
+        if not product:
+            raise ValueError("Bebida inválida")
+        beverage_product_id = product["id"]
+        stock_units = beverage_stock_consumption(product, quantity)
+        sale_unit = product["sale_unit"] or "unidad"
+        if sale_kind == "beverage":
+            category = "drink"
+            unit_price = float(product["price"])
+            description = f"{product['name']} · {sale_unit}"
+        elif sale_kind == "special_beverage":
+            category = "drink_special"
+            unit_price = price_from_option(payload.get("special_price"), allow_zero=False)
+            comment = str(payload.get("comment", "")).strip()[:160]
+            if len(comment) < 2:
+                raise ValueError("Escribí qué se vendió en el comentario")
+            description = f"Bebida especial · {product['name']} · {sale_unit} · {comment}"
+        elif sale_kind == "rrpp_benefit":
+            category = "rrpp_benefit"
+            unit_price = price_from_option(payload.get("benefit_price"), allow_zero=False)
+            description = f"BENEFICIO RRPP · {product['name']} · {sale_unit} · valor de referencia ${int(unit_price):,}".replace(",", ".")
+            payment_method = "other"
+        else:
+            if not birthday_discount_available(operation_dt):
+                raise ValueError(f"El 50% OFF de cumpleaños finalizó a las {BIRTHDAY_DISCOUNT_CUTOFF_LABEL}")
+            promoter_id = positive_int(payload.get("birthday_promoter_id"), "El cumpleaños", maximum=100000)
+            birthday = db.execute(
+                """SELECT p.id, be.birthday_person_name FROM birthday_events be
+                   JOIN promoters p ON p.id=be.promoter_id
+                   WHERE be.cash_session_id=? AND p.id=? AND p.active=1 AND p.is_birthday=1""",
+                (cash["id"], promoter_id),
+            ).fetchone()
+            if not birthday:
+                raise ValueError("Seleccioná un cumpleaños confirmado para este evento")
+            birthday_key = normalize_guest_name(birthday["birthday_person_name"])[1]
+            birthday_checked = db.execute(
+                """SELECT id FROM guest_checkins
+                   WHERE cash_session_id=? AND promoter_id=? AND normalized_name=? LIMIT 1""",
+                (cash["id"], promoter_id, birthday_key),
+            ).fetchone()
+            if not birthday_checked:
+                raise ValueError("El 50% OFF se habilita cuando ingresa el cumpleañero o cumpleañera")
+            category = "birthday_discount"
+            unit_price = round(float(product["price"]) * 0.5, 2)
+            description = f"50% OFF CUMPLEAÑOS · {birthday['birthday_person_name']} · {product['name']} · {sale_unit}"
+    elif sale_kind == "ticketing_product":
+        product_id = positive_int(payload.get("ticketing_product_id"), "El producto", maximum=100000)
+        product = db.execute("SELECT * FROM ticketing_products WHERE id=? AND active=1", (product_id,)).fetchone()
+        if not product:
+            raise ValueError("Producto de boletería inválido")
+        category = "cloakroom"
+        unit_price = float(product["price"])
+        description = product["name"]
+    else:
+        raise ValueError("Acción rápida inválida")
+
+    movement_sector = "beverages" if sale_kind in {"beverage", "special_beverage", "rrpp_benefit", "birthday_discount"} else "ticketing"
+    total = 0 if sale_kind == "rrpp_benefit" else round(unit_price * quantity, 2)
+    cursor = db.execute(
+        """
+        INSERT INTO movements(cash_session_id, movement_type, category, sector, description, quantity, unit_price, total, payment_method, created_at, created_by, promoter_id, beverage_product_id, stock_units)
+        VALUES (?, 'sale', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (cash["id"], category, movement_sector, description, quantity, unit_price, total, payment_method, operation_dt.isoformat(sep=" "), user["id"], promoter_id, beverage_product_id, stock_units),
+    )
+    messages = {
+        "rrpp_benefit": f"BENEFICIO RRPP registrado: {product['name']} × {quantity}. Se descontó del stock sin sumar recaudación.",
+        "special_beverage": f"Bebida especial registrada y asignada al stock de {product['name']}.",
+        "birthday_discount": f"50% OFF de cumpleaños aplicado: {product['name']} × {quantity}.",
+    }
+    return {
+        "movement_id": cursor.lastrowid,
+        "message": messages.get(sale_kind, f"Venta rápida registrada: {description} × {quantity}."),
+        "description": description,
+        "category": category,
+        "quantity": quantity,
+        "total": total,
+    }
+
+
 @app.post("/movements/quick-sale")
 @login_required
 def register_quick_sale():
@@ -1429,109 +1590,14 @@ def register_quick_sale():
         flash("Primero tenés que abrir una caja.", "error")
         return redirect(url_for("dashboard"))
     try:
-        sale_kind = request.form.get("sale_kind", "entry")
-        if g.user["role"] != "admin":
-            sector = current_sector()
-            if (sector == "ticketing" and sale_kind not in {"entry", "ticketing_product"}) or (sector == "beverages" and sale_kind not in {"beverage", "special_beverage", "rrpp_benefit", "birthday_discount"}):
-                abort(403)
-        quantity = positive_int(request.form.get("quantity", "1"), "La cantidad", maximum=100)
-        payment_method = request.form.get("payment_method", "cash")
-        if payment_method not in PAYMENT_METHODS:
-            raise ValueError("Medio de pago inválido")
-        promoter_id = None
-        beverage_product_id = None
-        stock_units = 0.0
-        product = None
-        if sale_kind == "entry":
-            category = request.form.get("category", "general")
-            row = get_db().execute("SELECT * FROM entry_prices WHERE category=? AND active=1", (category,)).fetchone()
-            if not row or category != "general":
-                raise ValueError("Solo está habilitada la entrada general. La entrada FREE se confirma desde Listas RRPP")
-            unit_price, phase = resolve_entry_price(row)
-            description = f"{row['label']} · {phase}"
-            promoter_value = request.form.get("promoter_id", "").strip()
-            promoter_id = int(promoter_value) if promoter_value else None
-            if promoter_id and not get_db().execute("SELECT id FROM promoters WHERE id=? AND active=1", (promoter_id,)).fetchone():
-                raise ValueError("Promotor inválido")
-        elif sale_kind in {"beverage", "special_beverage", "rrpp_benefit", "birthday_discount"}:
-            product_id = positive_int(request.form.get("beverage_id"), "La bebida", maximum=100000)
-            product = get_db().execute("SELECT * FROM beverage_products WHERE id=? AND active=1", (product_id,)).fetchone()
-            if not product:
-                raise ValueError("Bebida inválida")
-            beverage_product_id = product["id"]
-            stock_units = beverage_stock_consumption(product, quantity)
-            sale_unit = product["sale_unit"] or "unidad"
-            if sale_kind == "beverage":
-                category = "drink"
-                unit_price = float(product["price"])
-                description = f"{product['name']} · {sale_unit}"
-            elif sale_kind == "special_beverage":
-                category = "drink_special"
-                unit_price = price_from_option(request.form.get("special_price"), allow_zero=False)
-                comment = request.form.get("comment", "").strip()[:160]
-                if len(comment) < 2:
-                    raise ValueError("Escribí qué se vendió en el comentario")
-                description = f"Bebida especial · {product['name']} · {sale_unit} · {comment}"
-            elif sale_kind == "rrpp_benefit":
-                category = "rrpp_benefit"
-                unit_price = price_from_option(request.form.get("benefit_price"), allow_zero=False)
-                description = f"BENEFICIO RRPP · {product['name']} · {sale_unit} · valor de referencia ${int(unit_price):,}".replace(",", ".")
-                payment_method = "other"
-            else:
-                if not birthday_discount_available():
-                    raise ValueError(f"El 50% OFF de cumpleaños finalizó a las {BIRTHDAY_DISCOUNT_CUTOFF_LABEL}")
-                promoter_id = positive_int(request.form.get("birthday_promoter_id"), "El cumpleaños", maximum=100000)
-                birthday = get_db().execute(
-                    """SELECT p.id, be.birthday_person_name FROM birthday_events be
-                       JOIN promoters p ON p.id=be.promoter_id
-                       WHERE be.cash_session_id=? AND p.id=? AND p.active=1 AND p.is_birthday=1""",
-                    (cash["id"], promoter_id),
-                ).fetchone()
-                if not birthday:
-                    raise ValueError("Seleccioná un cumpleaños confirmado para este evento")
-                birthday_key = normalize_guest_name(birthday["birthday_person_name"])[1]
-                birthday_checked = get_db().execute(
-                    """SELECT id FROM guest_checkins
-                       WHERE cash_session_id=? AND promoter_id=? AND normalized_name=? LIMIT 1""",
-                    (cash["id"], promoter_id, birthday_key),
-                ).fetchone()
-                if not birthday_checked:
-                    raise ValueError("El 50% OFF se habilita cuando ingresa el cumpleañero o cumpleañera")
-                category = "birthday_discount"
-                unit_price = round(float(product["price"]) * 0.5, 2)
-                description = f"50% OFF CUMPLEAÑOS · {birthday['birthday_person_name']} · {product['name']} · {sale_unit}"
-        elif sale_kind == "ticketing_product":
-            product_id = positive_int(request.form.get("ticketing_product_id"), "El producto", maximum=100000)
-            product = get_db().execute("SELECT * FROM ticketing_products WHERE id=? AND active=1", (product_id,)).fetchone()
-            if not product:
-                raise ValueError("Producto de boletería inválido")
-            category = "cloakroom"
-            unit_price = float(product["price"])
-            description = product["name"]
-        else:
-            raise ValueError("Acción rápida inválida")
-        movement_sector = "beverages" if sale_kind in {"beverage", "special_beverage", "rrpp_benefit", "birthday_discount"} else "ticketing"
-        total = 0 if sale_kind == "rrpp_benefit" else round(unit_price * quantity, 2)
+        result = perform_quick_sale(get_db(), cash, g.user, request.form)
+        get_db().commit()
+    except PermissionError:
+        abort(403)
     except (ValueError, TypeError) as exc:
         flash(f"No se pudo registrar la venta: {exc}", "error")
         return redirect(url_for("dashboard"))
-
-    get_db().execute(
-        """
-        INSERT INTO movements(cash_session_id, movement_type, category, sector, description, quantity, unit_price, total, payment_method, created_at, created_by, promoter_id, beverage_product_id, stock_units)
-        VALUES (?, 'sale', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (cash["id"], category, movement_sector, description, quantity, unit_price, total, payment_method, now_iso(), g.user["id"], promoter_id, beverage_product_id, stock_units),
-    )
-    get_db().commit()
-    if sale_kind == "rrpp_benefit":
-        flash(f"BENEFICIO RRPP registrado: {product['name']} × {quantity}. Se descontó del stock sin sumar recaudación.", "success")
-    elif sale_kind == "special_beverage":
-        flash(f"Bebida especial registrada y asignada al stock de {product['name']}.", "success")
-    elif sale_kind == "birthday_discount":
-        flash(f"50% OFF de cumpleaños aplicado: {product['name']} × {quantity}.", "success")
-    else:
-        flash(f"Venta rápida registrada: {description} × {quantity}.", "success")
+    flash(result["message"], "success")
     return redirect(url_for("dashboard"))
 
 
@@ -2402,37 +2468,34 @@ def import_promoter_list():
     return redirect(url_for("promoter_lists", promoter=promoter_id))
 
 
-@app.post("/promoter-lists/<int:guest_id>/check-in")
-@ticketing_required
-def check_in_guest(guest_id):
-    cash = get_open_cash_session()
-    if not cash:
-        flash("No hay una caja abierta.", "error")
-        return redirect(url_for("promoter_lists"))
-    db = get_db()
+def perform_guest_checkin(db, cash, user, guest_id, *, created_at=None):
+    if user["role"] != "admin" and (user["sector"] or "ticketing") != "ticketing":
+        raise PermissionError("Tu usuario no puede confirmar ingresos")
     guest = db.execute(
-        """SELECT pg.*, p.name AS promoter_name, p.is_common, p.is_promo FROM promoter_guests pg JOIN promoters p ON p.id=pg.promoter_id WHERE pg.id=? AND pg.cash_session_id=?""",
+        """SELECT pg.*, p.name AS promoter_name, p.is_common, p.is_promo FROM promoter_guests pg
+           JOIN promoters p ON p.id=pg.promoter_id WHERE pg.id=? AND pg.cash_session_id=?""",
         (guest_id, cash["id"]),
     ).fetchone()
     if not guest:
-        abort(404)
-    if not free_entry_available():
-        flash("La entrada FREE finalizó a las 03:30. Ya no se pueden confirmar ingresos gratis.", "error")
-        return redirect(request.referrer or url_for("promoter_lists", q=guest["guest_name"]))
+        raise ValueError("La persona ya no pertenece al evento abierto")
+    operation_dt = operation_datetime(created_at)
+    if not free_entry_available(operation_dt):
+        raise ValueError("La entrada FREE finalizó a las 03:30")
     existing = db.execute(
-        """SELECT gc.*, p.name AS promoter_name FROM guest_checkins gc JOIN promoters p ON p.id=gc.promoter_id WHERE gc.cash_session_id=? AND gc.normalized_name=?""",
+        """SELECT gc.*, p.name AS promoter_name FROM guest_checkins gc
+           JOIN promoters p ON p.id=gc.promoter_id
+           WHERE gc.cash_session_id=? AND gc.normalized_name=?""",
         (cash["id"], guest["normalized_name"]),
     ).fetchone()
     if existing:
-        flash(f"{guest['guest_name']} ya ingresó y quedó acreditado a {existing['promoter_name']}.", "error")
-        return redirect(request.referrer or url_for("promoter_lists", q=guest["guest_name"]))
+        raise ValueError(f"{guest['guest_name']} ya ingresó y quedó acreditado a {existing['promoter_name']}")
     try:
         cursor = db.execute(
             """
             INSERT INTO guest_checkins(cash_session_id, promoter_guest_id, promoter_id, guest_name, normalized_name, checked_in_at, checked_in_by)
             VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            (cash["id"], guest["id"], guest["promoter_id"], guest["guest_name"], guest["normalized_name"], now_iso(), g.user["id"]),
+            (cash["id"], guest["id"], guest["promoter_id"], guest["guest_name"], guest["normalized_name"], operation_dt.isoformat(sep=" "), user["id"]),
         )
         checkin_id = cursor.lastrowid
         movement = db.execute(
@@ -2440,15 +2503,37 @@ def check_in_guest(guest_id):
             INSERT INTO movements(cash_session_id, movement_type, category, sector, description, quantity, unit_price, total, payment_method, created_at, created_by, promoter_id)
             VALUES (?, 'sale', 'free', 'ticketing', ?, 1, 0, 0, 'other', ?, ?, ?)
             """,
-            (cash["id"], f"Lista: {guest['guest_name']}", now_iso(), g.user["id"], guest["promoter_id"]),
+            (cash["id"], f"Lista: {guest['guest_name']}", operation_dt.isoformat(sep=" "), user["id"], guest["promoter_id"]),
         )
         db.execute("UPDATE guest_checkins SET movement_id=? WHERE id=?", (movement.lastrowid, checkin_id))
-        db.commit()
-        flash(f"Ingreso confirmado: {guest['guest_name']} · {guest['promoter_name']}.", "success")
-    except DB_INTEGRITY_ERRORS:
-        db.rollback()
-        flash("Ese nombre ya había sido ingresado en esta jornada.", "error")
-    return redirect(request.referrer or url_for("promoter_lists", q=guest["guest_name"]))
+    except DB_INTEGRITY_ERRORS as exc:
+        raise ValueError("Ese nombre ya había sido ingresado en esta jornada") from exc
+    return {
+        "checkin_id": checkin_id,
+        "movement_id": movement.lastrowid,
+        "guest_name": guest["guest_name"],
+        "promoter_name": guest["promoter_name"],
+        "message": f"Ingreso confirmado: {guest['guest_name']} · {guest['promoter_name']}.",
+    }
+
+
+@app.post("/promoter-lists/<int:guest_id>/check-in")
+@ticketing_required
+def check_in_guest(guest_id):
+    cash = get_open_cash_session()
+    if not cash:
+        flash("No hay una caja abierta.", "error")
+        return redirect(url_for("promoter_lists"))
+    try:
+        result = perform_guest_checkin(get_db(), cash, g.user, guest_id)
+        get_db().commit()
+        flash(result["message"], "success")
+    except PermissionError:
+        abort(403)
+    except ValueError as exc:
+        get_db().rollback()
+        flash(str(exc), "error")
+    return redirect(request.referrer or url_for("promoter_lists"))
 
 
 @app.post("/promoter-lists/<int:guest_id>/delete")
@@ -3052,6 +3137,256 @@ def toggle_beverage(beverage_id):
     return redirect(url_for("settings"))
 
 
+
+
+def offline_bootstrap_payload():
+    cash = get_open_cash_session()
+    user = g.user
+    payload = {
+        "version": APP_VERSION,
+        "server_time": now_iso(),
+        "server_epoch_ms": int(datetime.now().timestamp() * 1000),
+        "csrf_token": session.get("csrf_token"),
+        "user": {
+            "id": user["id"],
+            "name": user["name"],
+            "username": user["username"],
+            "role": user["role"],
+            "sector": current_sector(),
+        },
+        "cash_session": None,
+        "entry_prices": [],
+        "promoters": [],
+        "ticketing_products": [],
+        "beverages": [],
+        "guests": [],
+        "birthdays": [],
+    }
+    if not cash:
+        return payload
+    payload["cash_session"] = {
+        "id": cash["id"],
+        "event_name": cash["event_name"],
+        "event_date": cash["event_date"],
+        "capacity": cash["capacity"],
+        "opened_at": cash["opened_at"],
+    }
+    sector = current_sector()
+    show_ticketing = user["role"] == "admin" or sector == "ticketing"
+    show_beverages = user["role"] == "admin" or sector == "beverages"
+    if show_ticketing:
+        payload["entry_prices"] = [
+            {
+                "category": row["category"],
+                "label": row["label"],
+                "cutoff_time": row["cutoff_time"],
+                "before_price": float(row["before_price"]),
+                "after_price": float(row["after_price"]),
+            }
+            for row in get_db().execute(
+                "SELECT * FROM entry_prices WHERE active=1 AND category='general' ORDER BY category"
+            ).fetchall()
+        ]
+        payload["promoters"] = [
+            {"id": row["id"], "name": row["name"]}
+            for row in get_db().execute(
+                "SELECT id, name FROM promoters WHERE active=1 AND is_common=0 AND is_promo=0 ORDER BY name COLLATE NOCASE"
+            ).fetchall()
+        ]
+        payload["ticketing_products"] = [
+            {"id": row["id"], "name": row["name"], "price": float(row["price"])}
+            for row in get_db().execute(
+                "SELECT * FROM ticketing_products WHERE active=1 ORDER BY sort_order, name COLLATE NOCASE"
+            ).fetchall()
+        ]
+        payload["guests"] = [
+            {
+                "guest_id": row["guest_id"],
+                "guest_name": row["guest_name"],
+                "normalized_name": row["normalized_name"],
+                "promoter_id": row["promoter_id"],
+                "promoter_name": row["promoter_name"],
+                "is_common": bool(row["is_common"]),
+                "is_promo": bool(row["is_promo"]),
+                "is_birthday": bool(row["is_birthday"]),
+                "checked_in": bool(row["checkin_id"]),
+                "checked_in_at": row["checked_in_at"],
+            }
+            for row in get_db().execute(
+                """SELECT pg.id AS guest_id, pg.guest_name, pg.normalized_name, pg.promoter_id,
+                          p.name AS promoter_name, p.is_common, p.is_promo, p.is_birthday,
+                          gc.id AS checkin_id, gc.checked_in_at
+                   FROM promoter_guests pg
+                   JOIN promoters p ON p.id=pg.promoter_id
+                   LEFT JOIN guest_checkins gc
+                     ON gc.cash_session_id=pg.cash_session_id AND gc.normalized_name=pg.normalized_name
+                   WHERE pg.cash_session_id=?
+                   ORDER BY pg.guest_name COLLATE NOCASE, p.name COLLATE NOCASE""",
+                (cash["id"],),
+            ).fetchall()
+        ]
+    if show_beverages:
+        payload["beverages"] = [
+            {
+                "id": row["id"],
+                "name": row["name"],
+                "price": float(row["price"]),
+                "sale_unit": row["sale_unit"],
+                "stock_unit": row["stock_unit"],
+                "beverage_type": row["beverage_type"],
+                "brand": row["brand"],
+                "presentation": row["presentation"],
+            }
+            for row in get_db().execute(
+                "SELECT * FROM beverage_products WHERE active=1 ORDER BY sort_order, name COLLATE NOCASE"
+            ).fetchall()
+        ]
+        payload["birthdays"] = [
+            {
+                "promoter_id": row["id"],
+                "birthday_person_name": row["birthday_person_name"],
+                "checked_count": row["checked_count"],
+                "birthday_checked_in": bool(row["birthday_checked"]),
+            }
+            for row in birthday_promoter_statuses(get_db(), cash["id"])
+        ]
+    return payload
+
+
+@app.get("/api/offline/bootstrap")
+@login_required
+def offline_bootstrap():
+    response = jsonify(offline_bootstrap_payload())
+    response.headers["Cache-Control"] = "no-store, private"
+    return response
+
+
+def offline_result_from_row(row):
+    result = {}
+    if row and row["result_json"]:
+        try:
+            result = json.loads(row["result_json"])
+        except (TypeError, json.JSONDecodeError):
+            result = {"message": str(row["result_json"])}
+    return {
+        "operation_id": row["operation_id"],
+        "status": row["status"],
+        "result": result,
+    }
+
+
+@app.post("/api/offline/sync")
+@login_required
+def offline_sync():
+    body = request.get_json(silent=True) or {}
+    operations = body.get("operations") or []
+    device_id = str(body.get("device_id") or "").strip()[:100]
+    if not device_id or not isinstance(operations, list):
+        return jsonify({"ok": False, "error": "Solicitud offline inválida"}), 400
+    if len(operations) > 100:
+        return jsonify({"ok": False, "error": "Sincronizá como máximo 100 operaciones por vez"}), 400
+
+    results = []
+    db = get_db()
+    for item in operations:
+        operation_id = str((item or {}).get("operation_id") or "").strip()[:80]
+        operation_type = str((item or {}).get("operation_type") or "").strip()[:40]
+        payload = (item or {}).get("payload") or {}
+        cash_session_id = (item or {}).get("cash_session_id")
+        client_created_at = operation_time_iso((item or {}).get("created_at"), (item or {}).get("created_at_epoch_ms"))
+        original_user_id = (item or {}).get("user_id")
+        if not operation_id or not re.fullmatch(r"[A-Za-z0-9._:-]{12,80}", operation_id):
+            results.append({"operation_id": operation_id, "status": "conflict", "result": {"message": "Identificador offline inválido"}})
+            continue
+
+        existing = db.execute("SELECT * FROM offline_operations WHERE operation_id=?", (operation_id,)).fetchone()
+        if existing and existing["status"] in {"applied", "conflict"}:
+            results.append(offline_result_from_row(existing))
+            continue
+        if existing:
+            db.execute("DELETE FROM offline_operations WHERE operation_id=?", (operation_id,))
+            db.commit()
+
+        status = "applied"
+        result = {}
+        try:
+            if int(original_user_id or 0) != int(g.user["id"]):
+                raise ValueError("Esta operación fue creada por otro usuario. Iniciá sesión con ese usuario para sincronizarla")
+            cash = get_open_cash_session()
+            if not cash or int(cash["id"]) != int(cash_session_id or 0):
+                raise ValueError("El evento original ya no está abierto. La operación quedó en conflicto para revisión")
+            db.execute(
+                """INSERT INTO offline_operations(
+                       operation_id, cash_session_id, operation_type, payload_json, status,
+                       result_json, client_created_at, synced_at, created_by, device_id
+                   ) VALUES (?, ?, ?, ?, 'processing', NULL, ?, ?, ?, ?)""",
+                (operation_id, cash["id"], operation_type, json.dumps(payload, ensure_ascii=False), client_created_at, now_iso(), g.user["id"], device_id),
+            )
+            if operation_type == "quick_sale":
+                result = perform_quick_sale(db, cash, g.user, payload, created_at=client_created_at)
+            elif operation_type == "guest_checkin":
+                guest_id = positive_int(payload.get("guest_id"), "La persona", maximum=1000000)
+                result = perform_guest_checkin(db, cash, g.user, guest_id, created_at=client_created_at)
+            else:
+                raise ValueError("Tipo de operación offline no compatible")
+            db.execute(
+                "UPDATE offline_operations SET status='applied', result_json=?, synced_at=? WHERE operation_id=?",
+                (json.dumps(result, ensure_ascii=False), now_iso(), operation_id),
+            )
+            db.commit()
+        except PermissionError as exc:
+            db.rollback()
+            status = "conflict"
+            result = {"message": str(exc)}
+        except (ValueError, TypeError, *DB_INTEGRITY_ERRORS) as exc:
+            db.rollback()
+            status = "conflict"
+            result = {"message": str(exc)}
+        except Exception:
+            db.rollback()
+            app.logger.exception("Error temporal sincronizando la operación offline %s", operation_id)
+            status = "retry"
+            result = {"message": "Error temporal al sincronizar. Se volverá a intentar"}
+
+        if status != "applied":
+            try:
+                db.execute(
+                    """INSERT INTO offline_operations(
+                           operation_id, cash_session_id, operation_type, payload_json, status,
+                           result_json, client_created_at, synced_at, created_by, device_id
+                       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        operation_id, int(cash_session_id or 0), operation_type,
+                        json.dumps(payload, ensure_ascii=False), status,
+                        json.dumps(result, ensure_ascii=False), client_created_at,
+                        now_iso(), g.user["id"], device_id,
+                    ),
+                )
+                db.commit()
+            except DB_INTEGRITY_ERRORS:
+                db.rollback()
+                existing = db.execute("SELECT * FROM offline_operations WHERE operation_id=?", (operation_id,)).fetchone()
+                if existing:
+                    results.append(offline_result_from_row(existing))
+                    continue
+            except Exception:
+                db.rollback()
+        results.append({"operation_id": operation_id, "status": status, "result": result})
+
+    summary = {
+        "applied": sum(1 for row in results if row["status"] == "applied"),
+        "conflicts": sum(1 for row in results if row["status"] == "conflict"),
+        "retry": sum(1 for row in results if row["status"] == "retry"),
+    }
+    return jsonify({"ok": True, "results": results, "summary": summary, "bootstrap": offline_bootstrap_payload()})
+
+
+@app.get("/offline-operations")
+def offline_operations_page():
+    response = render_template("offline_operations.html")
+    return Response(response, mimetype="text/html")
+
+
 @app.route("/api/status")
 @login_required
 def api_status():
@@ -3098,6 +3433,7 @@ def manifest():
 def service_worker():
     response = send_from_directory(app.static_folder, "service-worker.js", mimetype="application/javascript")
     response.headers["Service-Worker-Allowed"] = "/"
+    response.headers["Cache-Control"] = "no-cache"
     return response
 
 

@@ -32,11 +32,12 @@ TABLES = [
     "list_workspaces",
     "movements",
     "birthday_benefits",
+    "offline_operations",
 ]
 SERIAL_TABLES = [
     "users", "cash_sessions", "promoters", "beverage_products", "ticketing_products",
     "beverage_stock", "birthday_events", "promoter_guests", "guest_checkins",
-    "list_imports", "movements", "birthday_benefits",
+    "list_imports", "movements", "birthday_benefits", "offline_operations",
 ]
 
 

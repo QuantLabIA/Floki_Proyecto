@@ -38,6 +38,7 @@ SERIAL_ID_TABLES = {
     "guest_checkins",
     "list_imports",
     "movements",
+    "offline_operations",
 }
 
 

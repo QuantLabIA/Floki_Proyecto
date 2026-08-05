@@ -1,42 +1,76 @@
-# Floki Manager v2.5.1 · Eventos con imagen opcional y banner dinámico
+# Floki Manager v2.6 · Offline First
 
-Versión preparada para la fase de producción de Floki Manager. Conserva todas las funciones y el diseño **Floki Minimal Luxe** de la v2.4.1, pero agrega una arquitectura dual:
+Esta versión mantiene PostgreSQL, Railway, la PWA instalable y los banners dinámicos de eventos, y agrega una **cola local de operaciones** para continuar trabajando durante cortes temporales de internet.
 
-- **SQLite local** para probar en una computadora sin configurar servicios externos.
-- **PostgreSQL cloud** cuando existe la variable `DATABASE_URL`.
-- **PWA instalable** desde celular, tablet o computadora.
-- **Gunicorn** y configuración lista para Railway.
+## Qué funciona sin conexión
 
+Después de abrir el evento y entrar al sistema al menos una vez con internet, el dispositivo guarda localmente el evento, los precios y el catálogo autorizado para ese usuario.
 
-## Eventos con imagen opcional y banner dinámico
+Pueden registrarse sin conexión:
 
-- Al crear un evento, el administrador puede subir una historia o flyer en JPG, PNG o WEBP.
-- La imagen es opcional; sin archivo se utiliza el banner predeterminado de Floki.
-- La vista previa actualiza el nombre, la fecha y la imagen antes de abrir la caja.
-- El banner aparece en el dashboard, el historial y el reporte del evento.
-- El administrador puede reemplazarlo o quitarlo durante la jornada.
-- Las imágenes se guardan dentro de SQLite o PostgreSQL, por lo que no dependen de una carpeta temporal del servidor.
-- El recorte es visual mediante `cover`: la foto se adapta al panel sin deformarse.
-- Tamaño máximo: 6 MB. Formatos admitidos: JPG, PNG y WEBP.
+- entrada general;
+- guardarropa;
+- venta normal de bebidas;
+- bebida especial con comentario;
+- BENEFICIO RRPP;
+- 50% OFF de cumpleaños, sujeto a validación al sincronizar;
+- confirmación de personas cargadas en listas RRPP, PROMOS, cumpleaños o Lista común.
 
-## Qué cambia en esta fase
+Cada operación recibe un identificador único. Cuando vuelve internet, se envía a PostgreSQL y el servidor evita que se registre dos veces aunque el dispositivo reintente.
 
-- La aplicación ya puede vivir en un servidor y abrirse mediante una URL aunque la computadora personal esté apagada.
-- Administrador, boletería y bebidas utilizan una misma base PostgreSQL.
-- Se agregó `/health` para comprobar aplicación y base de datos.
-- Se agregaron cookies seguras, cabeceras de seguridad y compatibilidad con proxy HTTPS.
-- El ícono **Instalar app** aparece cuando el navegador lo permite.
-- Se muestra el estado `En línea` / `Sin conexión`.
-- Los archivos estáticos se guardan para que la aplicación abra con rapidez.
-- Las páginas privadas y datos de caja **no se guardan en la caché del navegador**.
+## Qué continúa requiriendo internet
 
-> Esta entrega instala la aplicación y muestra una pantalla segura cuando no hay red. Las ventas sin conexión y su sincronización automática corresponden a la siguiente subfase; no deben registrarse operaciones cuando el indicador diga `Sin conexión`.
+Por seguridad y para evitar conflictos entre celulares:
 
-## Uso local con SQLite
+- crear, eliminar o cerrar eventos;
+- modificar usuarios y permisos;
+- cambiar precios o catálogo;
+- importar listas o stock;
+- modificar el conteo de stock;
+- anular movimientos;
+- entregar el regalo físico de cumpleaños;
+- exportar PDF o Excel.
+
+## Preparar un dispositivo para trabajar offline
+
+1. Abrí Floki Manager con internet.
+2. Iniciá sesión con el usuario que realmente utilizará ese teléfono o computadora.
+3. Abrí el evento y esperá unos segundos en el dashboard.
+4. Confirmá que aparezca `En línea`.
+5. Desde ese momento, el evento, precios, bebidas y listas disponibles quedan preparados en ese dispositivo.
+
+Las colas pertenecen al usuario y al evento que estaban activos al momento de guardar la operación. Para sincronizarlas hay que volver a iniciar sesión con ese mismo usuario.
+
+## Indicadores
+
+La barra superior muestra:
+
+- `En línea` o `Sin conexión`;
+- cantidad de operaciones pendientes;
+- cantidad de conflictos;
+- botón `Sincronizar`.
+
+La pantalla `/offline-operations` permite trabajar con el último evento guardado, revisar conflictos y borrar los datos locales del dispositivo.
+
+## Conflictos posibles
+
+Una operación queda en conflicto cuando, por ejemplo:
+
+- otra caja ya confirmó el mismo nombre;
+- el evento fue cerrado antes de sincronizar;
+- se modificó o desactivó una bebida;
+- el horario del beneficio ya había vencido;
+- se intenta sincronizar con otro usuario.
+
+Los conflictos no se suman a la caja. Quedan visibles en el dispositivo para poder revisarlos o descartarlos.
+
+## Advertencia para el cierre
+
+El administrador no debería cerrar la caja hasta que todos los dispositivos muestren `0 pendientes`. La web bloquea el cierre cuando **ese dispositivo** tiene operaciones locales pendientes, pero un servidor no puede conocer la cola de un celular que continúa completamente desconectado.
+
+## Instalación local
 
 ### Windows
-
-Ejecutá:
 
 ```text
 start_windows.bat
@@ -48,67 +82,66 @@ start_windows.bat
 ./start_linux_mac.sh
 ```
 
-Sin `DATABASE_URL`, la aplicación crea y utiliza:
+Sin `DATABASE_URL`, utiliza SQLite en:
 
 ```text
 data/floki.db
 ```
 
-Usuarios iniciales:
+## Railway y PostgreSQL
+
+La v2.6 actualiza automáticamente el esquema y agrega la tabla `offline_operations`. No hay que borrar PostgreSQL ni crear otro proyecto.
+
+Para actualizar:
+
+```bash
+git add .
+git commit -m "Floki Manager v2.6 Offline First"
+git push
+```
+
+Railway detectará el cambio y volverá a desplegar el servicio.
+
+Comprobación:
+
+```text
+https://TU-DOMINIO/health
+```
+
+Debe indicar:
+
+```json
+{
+  "status": "ok",
+  "version": "2.6.0",
+  "database": "postgresql"
+}
+```
+
+## PWA
+
+- Android: Chrome → Instalar aplicación.
+- iPhone/iPad: Safari → Compartir → Agregar a pantalla de inicio.
+- Windows: Edge/Chrome → Instalar aplicación.
+
+## Usuarios iniciales
 
 - Administrador: `admin` / `admin123`
 - Boletería: `cajero` / `floki123`
 - Bebidas: `bebidas` / `floki123`
 
-Cambiá las tres contraseñas antes de usarla con dinero real.
+Cambiá las contraseñas antes de usar dinero real.
 
-## Publicación cloud
-
-Seguí [DEPLOY_RAILWAY.md](DEPLOY_RAILWAY.md). La carpeta ya incluye:
-
-- `railway.json`
-- `Procfile`
-- `.env.example`
-- `Gunicorn`
-- cliente PostgreSQL
-- endpoint `/health`
-
-## Migrar datos locales
-
-Para una base PostgreSQL nueva:
-
-```bash
-python migrate_sqlite_to_postgres.py \
-  --sqlite data/floki.db \
-  --database-url "postgresql://..." \
-  --replace
-```
-
-El comando reemplaza el contenido de la base PostgreSQL destino. No debe ejecutarse sobre una base que ya tenga operaciones nuevas.
-
-## Instalar desde el celular
-
-Después de publicar la URL:
-
-- Android/Chrome: abrí la URL y usá `Instalar app`.
-- iPhone/Safari: Compartir → `Agregar a pantalla de inicio`.
-
-La aplicación queda con el ícono de Floki y se abre sin la barra normal del navegador.
-
-## Base de datos y respaldos
-
-- En modo local, Configuración permite generar respaldos `.db`.
-- En modo PostgreSQL, los respaldos deben configurarse en el proveedor cloud. La aplicación no crea copias SQLite de una base remota.
-
-## Archivos principales de producción
+## Archivos principales
 
 ```text
-app.py                         Aplicación Flask
- database.py                   Compatibilidad SQLite/PostgreSQL
- migrate_sqlite_to_postgres.py Migración opcional
- railway.json                  Configuración Railway
- Procfile                      Inicio con Gunicorn
- .env.example                  Variables necesarias
- static/manifest.webmanifest   Instalación PWA
- static/service-worker.js      Caché segura de recursos
+app.py                         Flask, validaciones y sincronización
+ database.py                   SQLite/PostgreSQL
+ static/js/offline-sync.js     IndexedDB, cola e idempotencia cliente
+ static/js/offline-page.js     Pantalla operativa sin conexión
+ static/service-worker.js      App shell y apertura offline
+ templates/offline_operations.html
+ tests/test_offline_first.py
 ```
+
+Antes de usar la versión en una fecha real, completá las pruebas de [OFFLINE_TEST_CHECKLIST.md](OFFLINE_TEST_CHECKLIST.md).

@@ -204,7 +204,7 @@ const renderSuggestions = (suggestions) => {
       const unavailable = list.free_available === false;
       const disabled = item.checked_in || unavailable;
       const detail = unavailable ? (list.unavailable_reason || 'FREE no disponible') : (list.is_common ? 'Lista común · hasta las 03:30' : (list.is_promo ? 'PROMOS · hasta las 03:30' : 'Lista de promotor · hasta las 03:30'));
-      return `<form action="${escapeHtml(action)}" method="post" class="suggestion-list-form ${unavailable ? 'unavailable' : ''}" data-confirm="¿Confirmar el ingreso de ${escapeHtml(item.name)} para ${escapeHtml(list.promoter_name)}?">
+      return `<form action="${escapeHtml(action)}" method="post" class="suggestion-list-form ${unavailable ? 'unavailable' : ''}" data-offline-operation="guest_checkin" data-guest-id="${list.guest_id}" data-confirm="¿Confirmar el ingreso de ${escapeHtml(item.name)} para ${escapeHtml(list.promoter_name)}?">
         <input type="hidden" name="csrf_token" value="${escapeHtml(csrf)}">
         <button type="submit" ${disabled ? 'disabled' : ''}><span>${escapeHtml(list.promoter_name)}</span><small>${escapeHtml(detail)}</small></button>
       </form>`;
@@ -333,7 +333,7 @@ window.addEventListener('appinstalled', () => {
   if (installButton) installButton.hidden = true;
 });
 
-// Floki Manager v2.6: vista previa del banner dinámico del evento.
+// Floki Manager v2.5.1: vista previa del banner dinámico del evento.
 const eventCreateForm = document.querySelector('[data-event-create-form]');
 if (eventCreateForm) {
   const imageInput = eventCreateForm.querySelector('[data-event-image-input]');

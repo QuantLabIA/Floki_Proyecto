@@ -1,10 +1,12 @@
-const VERSION = 'floki-manager-v2-5-1-event-banner';
+const VERSION = 'floki-manager-v2-6-offline-first';
 const STATIC_CACHE = `${VERSION}-static`;
-const PAGE_CACHE = `${VERSION}-pages`;
 const CORE = [
+  '/offline-operations',
   '/offline',
   '/static/css/app.css',
   '/static/js/app.js',
+  '/static/js/offline-sync.js',
+  '/static/js/offline-page.js',
   '/static/img/floki-logo-white.png',
   '/static/img/floki-login-viking.png',
   '/static/img/floki-club-bg.jpg',
@@ -20,18 +22,17 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) => Promise.all(
-      keys.filter((key) => ![STATIC_CACHE, PAGE_CACHE].includes(key)).map((key) => caches.delete(key))
+      keys.filter((key) => key !== STATIC_CACHE).map((key) => caches.delete(key))
     ))
   );
   self.clients.claim();
 });
 
-const networkFirstPage = async (request) => {
+const networkFirstNavigation = async (request) => {
   try {
-    // Las páginas contienen datos privados de caja: nunca se guardan en caché.
     return await fetch(request, { cache: 'no-store' });
   } catch (error) {
-    return await caches.match('/offline');
+    return (await caches.match('/offline-operations')) || (await caches.match('/offline')) || Response.error();
   }
 };
 
@@ -54,10 +55,11 @@ self.addEventListener('fetch', (event) => {
   if (url.origin !== self.location.origin) return;
 
   if (request.mode === 'navigate') {
-    event.respondWith(networkFirstPage(request));
+    event.respondWith(networkFirstNavigation(request));
     return;
   }
-  if (url.pathname.startsWith('/static/')) {
+  if (url.pathname.startsWith('/api/')) return;
+  if (url.pathname.startsWith('/static/') || CORE.includes(url.pathname)) {
     event.respondWith(staleWhileRevalidate(request));
   }
 });

@@ -39,3 +39,17 @@
 - Cola local de operaciones.
 - Sincronización al recuperar conexión.
 - Prevención de duplicados y cierre condicionado a sincronización.
+
+## v2.6 · Offline First
+
+- Cola local con IndexedDB.
+- Sincronización idempotente.
+- Ventas rápidas y listas durante cortes temporales.
+- Conflictos visibles por dispositivo.
+
+## Próximas mejoras candidatas
+
+- Panel administrador de dispositivos y última sincronización.
+- Alertas antes del cierre cuando un dispositivo no reporta actividad reciente.
+- Sincronización en segundo plano donde el navegador lo permita.
+- Dominio propio de Floki Club.
