@@ -1,4 +1,4 @@
-const VERSION = 'floki-manager-v2-5-cloud-pwa';
+const VERSION = 'floki-manager-v2-5-1-event-banner';
 const STATIC_CACHE = `${VERSION}-static`;
 const PAGE_CACHE = `${VERSION}-pages`;
 const CORE = [

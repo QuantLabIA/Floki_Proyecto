@@ -498,6 +498,47 @@ Ingrid becerra
         self.assertEqual(connection.execute("SELECT COUNT(*) FROM guest_checkins WHERE normalized_name='promotor test'").fetchone()[0], 0)
         connection.close()
 
+    def test_event_image_is_saved_served_and_removed(self):
+        token = self.login()
+        png = b"\x89PNG\r\n\x1a\n" + b"test-image-data"
+        response = self.client.post(
+            "/cash/open",
+            data={
+                "opening_amount": "0",
+                "event_name": "Noche Imagen",
+                "event_date": "2026-08-05",
+                "capacity": "",
+                "event_image": (io.BytesIO(png), "historia.png"),
+                "csrf_token": token,
+            },
+            content_type="multipart/form-data",
+            follow_redirects=True,
+        )
+        self.assertIn(b"Noche Imagen", response.data)
+        connection = sqlite3.connect(self.db_path)
+        session_id, image_name = connection.execute(
+            "SELECT id,event_image_name FROM cash_sessions WHERE status='open'"
+        ).fetchone()
+        connection.close()
+        self.assertEqual(image_name, "historia.png")
+        banner = self.client.get(f"/events/{session_id}/banner")
+        self.assertEqual(banner.status_code, 200)
+        self.assertEqual(banner.mimetype, "image/png")
+        self.assertTrue(banner.data.startswith(b"\x89PNG"))
+        response = self.client.post(
+            f"/events/{session_id}/banner",
+            data={"banner_action": "remove", "csrf_token": token, "return_to": "/"},
+            follow_redirects=True,
+        )
+        self.assertIn("banner Floki predeterminado".encode("utf-8"), response.data)
+        connection = sqlite3.connect(self.db_path)
+        values = connection.execute(
+            "SELECT event_image_data,event_image_mime,event_image_name FROM cash_sessions WHERE id=?",
+            (session_id,),
+        ).fetchone()
+        connection.close()
+        self.assertEqual(values, (None, None, None))
+
     def test_cashier_permissions(self):
         token = self.login("cajero", "floki123")
         response = self.client.post(
@@ -529,7 +570,7 @@ class MigrationTestCase(unittest.TestCase):
             connection = sqlite3.connect(db_path)
             cash_columns = {row[1] for row in connection.execute("PRAGMA table_info(cash_sessions)")}
             movement_columns = {row[1] for row in connection.execute("PRAGMA table_info(movements)")}
-            self.assertTrue({"event_name", "event_date", "capacity"}.issubset(cash_columns))
+            self.assertTrue({"event_name", "event_date", "capacity", "event_image_data", "event_image_mime", "event_image_name"}.issubset(cash_columns))
             self.assertIn("promoter_id", movement_columns)
             self.assertIn("beverage_product_id", movement_columns)
             self.assertIn("stock_units", movement_columns)

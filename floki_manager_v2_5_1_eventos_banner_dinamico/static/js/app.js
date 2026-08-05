@@ -332,3 +332,34 @@ installButton?.addEventListener('click', async () => {
 window.addEventListener('appinstalled', () => {
   if (installButton) installButton.hidden = true;
 });
+
+// Floki Manager v2.6: vista previa del banner dinámico del evento.
+const eventCreateForm = document.querySelector('[data-event-create-form]');
+if (eventCreateForm) {
+  const imageInput = eventCreateForm.querySelector('[data-event-image-input]');
+  const nameInput = eventCreateForm.querySelector('[data-event-name-input]');
+  const dateInput = eventCreateForm.querySelector('[data-event-date-input]');
+  const preview = eventCreateForm.querySelector('[data-event-banner-preview]');
+  const namePreview = eventCreateForm.querySelector('[data-event-name-preview]');
+  const datePreview = eventCreateForm.querySelector('[data-event-date-preview]');
+  let previewUrl = null;
+
+  const refreshEventCopy = () => {
+    if (namePreview) namePreview.textContent = nameInput?.value.trim() || 'Noche Floki';
+    if (datePreview && dateInput?.value) {
+      const [year, month, day] = dateInput.value.split('-');
+      datePreview.textContent = `${day}/${month}/${year}`;
+    }
+  };
+
+  imageInput?.addEventListener('change', () => {
+    const file = imageInput.files?.[0];
+    if (!file || !preview) return;
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    previewUrl = URL.createObjectURL(file);
+    preview.style.backgroundImage = `url("${previewUrl}")`;
+  });
+  nameInput?.addEventListener('input', refreshEventCopy);
+  dateInput?.addEventListener('change', refreshEventCopy);
+  refreshEventCopy();
+}

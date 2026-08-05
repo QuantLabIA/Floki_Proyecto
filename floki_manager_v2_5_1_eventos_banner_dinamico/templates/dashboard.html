@@ -2,43 +2,53 @@
 {% block title %}Caja · Floki Manager{% endblock %}
 {% block content %}
 {% if not cash %}
-<section class="empty-state card">
-  <div class="status-orb"></div>
-  <p class="eyebrow">SIN EVENTO ABIERTO</p>
+<section class="event-create-layout card">
   {% if g.user['role']=='admin' %}
-  <h1>Crear una nueva jornada</h1>
-  <p class="muted">Elegí la fecha desde el calendario. El monto inicial y la capacidad pueden dejarse vacíos.</p>
-  <form action="{{ url_for('open_cash') }}" method="post" class="open-cash-form">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <div class="form-grid-2">
-      <label>Nombre del evento<input name="event_name" value="Noche Floki" maxlength="100" required></label>
-      <label>Fecha del evento<input type="date" name="event_date" value="{{ today }}" required></label>
-    </div>
-    <div class="form-grid-2">
-      <label>Monto inicial opcional<input inputmode="decimal" name="opening_amount" placeholder="Vacío = $0"></label>
-      <label>Capacidad opcional<input inputmode="numeric" type="number" min="0" max="10000" name="capacity" placeholder="Sin límite declarado"></label>
-    </div>
-    <button class="primary-button full" type="submit">Crear evento y abrir caja</button>
-  </form>
+  <div class="event-create-copy">
+    <p class="eyebrow">NUEVO EVENTO</p>
+    <h1>Crear una nueva jornada</h1>
+    <p class="muted">La imagen es opcional. Si no subís una, Floki usa el banner predeterminado.</p>
+    <form action="{{ url_for('open_cash') }}" method="post" class="open-cash-form" enctype="multipart/form-data" data-event-create-form>
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <div class="event-banner-preview" data-event-banner-preview style="background-image:url('{{ url_for('static', filename='img/floki-club-bg.jpg') }}')">
+        <div class="event-banner-shade"></div>
+        <div class="event-banner-copy"><small data-event-date-preview>{{ today|date_ar }}</small><strong data-event-name-preview>Noche Floki</strong><span>FLOKI CLUB</span></div>
+      </div>
+      <label class="event-image-picker">Imagen del evento opcional
+        <input type="file" name="event_image" accept="image/jpeg,image/png,image/webp" data-event-image-input>
+        <small>Historia o flyer JPG, PNG o WEBP · máximo 6 MB. Se adapta automáticamente sin deformarse.</small>
+      </label>
+      <div class="form-grid-2">
+        <label>Nombre del evento<input name="event_name" value="Noche Floki" maxlength="100" required data-event-name-input></label>
+        <label>Fecha del evento<input type="date" name="event_date" value="{{ today }}" required data-event-date-input></label>
+      </div>
+      <div class="form-grid-2">
+        <label>Monto inicial opcional<input inputmode="decimal" name="opening_amount" placeholder="Vacío = $0"></label>
+        <label>Capacidad opcional<input inputmode="numeric" type="number" min="0" max="10000" name="capacity" placeholder="Sin límite declarado"></label>
+      </div>
+      <button class="primary-button full" type="submit">Crear evento y abrir caja</button>
+    </form>
+  </div>
   {% else %}
-  <h1>Esperando la apertura del evento</h1>
-  <p class="muted">Un administrador debe crear la jornada. Tu acceso está asignado a <strong>{{ sector_labels.get(sector, sector) }}</strong>.</p>
+  <div class="event-create-copy waiting-event-copy"><div class="status-orb"></div><h1>Esperando la apertura del evento</h1>
+  <p class="muted">Un administrador debe crear la jornada. Tu acceso está asignado a <strong>{{ sector_labels.get(sector, sector) }}</strong>.</p></div>
   {% endif %}
 </section>
 {% else %}
-<section class="hero-row">
-  <div>
+<section class="hero-row event-hero-banner" style="background-image:url('{{ url_for('event_banner', session_id=cash['id']) }}?v={{ cash['event_image_name'] or 'default' }}')">
+  <div class="event-hero-overlay"></div>
+  <div class="event-hero-content">
     <p class="eyebrow"><span class="live-dot"></span> EVENTO ABIERTO · #{{ cash['id'] }} · {{ cash['event_date']|date_ar }}</p>
     <h1>{{ cash['event_name'] }}</h1>
     {% if g.user['role']=='admin' %}
     <p class="hero-money">{{ expected_cash|money }}</p>
-    <p class="muted">Efectivo esperado · abierta por {{ cash['opened_by_name'] }}</p>
+    <p class="event-hero-muted">Efectivo esperado · abierta por {{ cash['opened_by_name'] }}</p>
     {% else %}
     <p class="sector-hero-label">{{ sector_labels.get(sector, sector) }} - {{ g.user['name'] }}</p>
-    <p class="muted">Los resultados y ganancias solo están disponibles para administración.</p>
+    <p class="event-hero-muted">Los resultados y ganancias solo están disponibles para administración.</p>
     {% endif %}
   </div>
-  {% if g.user['role']=='admin' %}<button class="secondary-button" data-modal-open="close-cash-modal">Cerrar caja</button>{% endif %}
+  {% if g.user['role']=='admin' %}<div class="event-hero-actions"><button class="secondary-button glass-button" data-modal-open="event-banner-modal">Cambiar imagen</button><button class="secondary-button glass-button" data-modal-open="close-cash-modal">Cerrar caja</button></div>{% endif %}
 </section>
 
 {% if g.user['role']=='admin' %}
@@ -223,6 +233,7 @@
 {% endif %}
 
 {% if g.user['role']=='admin' %}
+<div class="modal" id="event-banner-modal" aria-hidden="true"><div class="modal-backdrop" data-modal-close></div><section class="modal-card"><button class="modal-close" data-modal-close aria-label="Cerrar">×</button><p class="eyebrow">IMAGEN DEL EVENTO</p><h2>Actualizar banner dinámico</h2><p class="muted">Subí una historia o flyer. El sistema la recorta visualmente para adaptarla al panel sin deformarla.</p><form action="{{ url_for('update_event_banner', session_id=cash['id']) }}" method="post" enctype="multipart/form-data" class="stack-form"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="return_to" value="{{ url_for('dashboard') }}"><input type="hidden" name="banner_action" value="replace"><label>Nueva imagen<input type="file" name="event_image" accept="image/jpeg,image/png,image/webp" required></label><button class="primary-button full" type="submit">Guardar nueva imagen</button></form><form action="{{ url_for('update_event_banner', session_id=cash['id']) }}" method="post" class="stack-form banner-remove-form" data-confirm="¿Volver al banner predeterminado de Floki?"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="return_to" value="{{ url_for('dashboard') }}"><input type="hidden" name="banner_action" value="remove"><button class="secondary-button full" type="submit">Quitar imagen y usar la predeterminada</button></form></section></div>
 <div class="modal" id="sale-modal" aria-hidden="true"><div class="modal-backdrop" data-modal-close></div><section class="modal-card"><button class="modal-close" data-modal-close aria-label="Cerrar">×</button><p class="eyebrow">VENTA ESPECIAL</p><h2>Registrar otro concepto</h2><form action="{{ url_for('register_sale') }}" method="post" class="stack-form"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="category" value="other"><div class="form-grid-2"><label>Cantidad<select name="quantity">{% for number in range(1, 51) %}<option value="{{ number }}">{{ number }}</option>{% endfor %}</select></label><label>Precio unitario<select name="unit_price" required>{% for price in price_options %}<option value="{{ price }}">{{ price|money }}</option>{% endfor %}</select></label></div><label>Medio de pago<select name="payment_method"><option value="cash">Efectivo</option><option value="mercadopago">Mercado Pago</option><option value="transfer">Transferencia</option><option value="debit">Débito</option><option value="credit">Crédito</option><option value="other">Otro</option></select></label><label>Detalle<input name="description" maxlength="180" required placeholder="Ej.: Mesa, guardarropa, otro producto"></label><button class="primary-button full" type="submit">Guardar venta</button></form></section></div>
 <div class="modal" id="expense-modal" aria-hidden="true"><div class="modal-backdrop" data-modal-close></div><section class="modal-card"><button class="modal-close" data-modal-close aria-label="Cerrar">×</button><p class="eyebrow">NUEVO MOVIMIENTO</p><h2>Registrar gasto</h2><form action="{{ url_for('register_expense') }}" method="post" class="stack-form"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><label>Descripción<input name="description" required maxlength="180" placeholder="Ej.: Hielo"></label><label>Monto<input inputmode="decimal" name="amount" required placeholder="0"></label><label>Medio de pago<select name="payment_method"><option value="cash">Efectivo</option><option value="mercadopago">Mercado Pago</option><option value="transfer">Transferencia</option><option value="debit">Débito</option><option value="credit">Crédito</option><option value="other">Otro</option></select></label><button class="primary-button full" type="submit">Guardar gasto</button></form></section></div>
 <div class="modal" id="close-cash-modal" aria-hidden="true"><div class="modal-backdrop" data-modal-close></div><section class="modal-card"><button class="modal-close" data-modal-close aria-label="Cerrar">×</button><p class="eyebrow">CIERRE</p><h2>Cerrar caja</h2><div class="close-summary"><span>Efectivo esperado</span><strong>{{ expected_cash|money }}</strong></div>{% if stock_pending %}<div class="stock-close-warning"><strong>Stock pendiente</strong><span>{{ stock_pending }} bebidas todavía no tienen cantidad final.</span><a href="{{ url_for('stock') }}">Completar planilla</a></div>{% endif %}<p class="muted compact-copy">Al cerrar se eliminan automáticamente los nombres de las listas RRPP de esta jornada.</p><form action="{{ url_for('close_cash') }}" method="post" class="stack-form"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><label>Efectivo contado<input inputmode="decimal" name="declared_cash" required placeholder="0"></label><label>Observaciones<textarea name="notes" rows="3" maxlength="500" placeholder="Opcional"></textarea></label><button class="danger-button full" type="submit">Confirmar cierre</button></form></section></div>

@@ -9,7 +9,8 @@
   {% if sessions %}{% for cash in sessions %}
   <div class="history-row-wrap">
     <a class="history-row" href="{{ url_for('session_detail', session_id=cash['id']) }}">
-      <div><strong>{{ cash['event_name'] }} · Caja #{{ cash['id'] }}</strong><small>Evento: {{ cash['event_date']|date_ar }} · abierta {{ cash['opened_at']|datetime_ar }} por {{ cash['opened_by_name'] }}</small></div>
+      <span class="history-event-thumb" style="background-image:url('{{ url_for('event_banner', session_id=cash['id']) }}?v={{ cash['event_image_name'] or 'default' }}')"></span>
+      <div class="history-event-copy"><strong>{{ cash['event_name'] }} · Caja #{{ cash['id'] }}</strong><small>Evento: {{ cash['event_date']|date_ar }} · abierta {{ cash['opened_at']|datetime_ar }} por {{ cash['opened_by_name'] }}</small></div>
       <div class="history-numbers"><span>Ventas {{ cash['sales']|money }}</span><span>Gastos {{ cash['expenses']|money }}</span><span>{{ cash['people_count'] }} ingresos</span></div><span class="status-pill {{ cash['status'] }}">{{ 'Abierta' if cash['status']=='open' else 'Cerrada' }}</span>
     </a>
     {% if cash['status']=='closed' %}<form action="{{ url_for('delete_cash_session', session_id=cash['id']) }}" method="post" data-confirm="¿Eliminar definitivamente {{ cash['event_name'] }} y todos sus movimientos? Se creará un respaldo antes."><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="tiny-danger delete-event-button" type="submit">Eliminar evento</button></form>{% endif %}

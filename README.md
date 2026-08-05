@@ -1,4 +1,4 @@
-# Floki Manager v2.5 · Cloud + PWA
+# Floki Manager v2.5.1 · Eventos con imagen opcional y banner dinámico
 
 Versión preparada para la fase de producción de Floki Manager. Conserva todas las funciones y el diseño **Floki Minimal Luxe** de la v2.4.1, pero agrega una arquitectura dual:
 
@@ -6,6 +6,18 @@ Versión preparada para la fase de producción de Floki Manager. Conserva todas 
 - **PostgreSQL cloud** cuando existe la variable `DATABASE_URL`.
 - **PWA instalable** desde celular, tablet o computadora.
 - **Gunicorn** y configuración lista para Railway.
+
+
+## Eventos con imagen opcional y banner dinámico
+
+- Al crear un evento, el administrador puede subir una historia o flyer en JPG, PNG o WEBP.
+- La imagen es opcional; sin archivo se utiliza el banner predeterminado de Floki.
+- La vista previa actualiza el nombre, la fecha y la imagen antes de abrir la caja.
+- El banner aparece en el dashboard, el historial y el reporte del evento.
+- El administrador puede reemplazarlo o quitarlo durante la jornada.
+- Las imágenes se guardan dentro de SQLite o PostgreSQL, por lo que no dependen de una carpeta temporal del servidor.
+- El recorte es visual mediante `cover`: la foto se adapta al panel sin deformarse.
+- Tamaño máximo: 6 MB. Formatos admitidos: JPG, PNG y WEBP.
 
 ## Qué cambia en esta fase
 

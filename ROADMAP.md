@@ -26,3 +26,16 @@
 - Detección y resolución de conflictos.
 - Indicador de movimientos pendientes.
 - Bloqueo de acciones no seguras sin conexión.
+
+
+## v2.5.1 · Eventos con imagen opcional y banner dinámico
+
+- Imagen opcional por evento.
+- Vista previa y banner adaptativo.
+- Persistencia SQLite/PostgreSQL.
+
+## Próxima fase: v2.6 Offline First
+
+- Cola local de operaciones.
+- Sincronización al recuperar conexión.
+- Prevención de duplicados y cierre condicionado a sincronización.

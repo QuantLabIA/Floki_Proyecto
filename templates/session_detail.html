@@ -1,8 +1,8 @@
 {% extends 'base.html' %}
 {% block title %}Caja #{{ cash['id'] }} · Floki Manager{% endblock %}
 {% block content %}
-<section class="page-heading report-heading">
-  <div><p class="eyebrow">REPORTE DE CAJA #{{ cash['id'] }}</p><h1>{{ cash['event_name'] }}</h1><p class="muted">Evento {{ cash['event_date']|date_ar }} · abierta {{ cash['opened_at']|datetime_ar }} por {{ cash['opened_by_name'] }}</p></div>
+<section class="page-heading report-heading event-report-heading" style="background-image:url('{{ url_for('event_banner', session_id=cash['id']) }}?v={{ cash['event_image_name'] or 'default' }}')">
+  <div class="event-report-overlay"></div><div class="event-report-copy"><p class="eyebrow">REPORTE DE CAJA #{{ cash['id'] }}</p><h1>{{ cash['event_name'] }}</h1><p>Evento {{ cash['event_date']|date_ar }} · abierta {{ cash['opened_at']|datetime_ar }} por {{ cash['opened_by_name'] }}</p></div>
   <div class="button-row">
     <a class="secondary-button" href="{{ url_for('session_print', session_id=cash['id']) }}" target="_blank">Imprimir / PDF</a>
     <a class="secondary-button" href="{{ url_for('export_stock_xlsx', session_id=cash['id']) }}">Excel de stock</a><a class="primary-button" href="{{ url_for('export_session_csv', session_id=cash['id']) }}">Exportar CSV</a>

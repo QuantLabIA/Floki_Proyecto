@@ -66,7 +66,7 @@ DATA_DIR = BASE_DIR / "data"
 BACKUP_DIR = BASE_DIR / "backups"
 DATABASE = DATA_DIR / "floki.db"
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
-APP_VERSION = "2.5.0"
+APP_VERSION = "2.5.1"
 
 PAYMENT_METHODS = {"cash", "mercadopago", "transfer", "debit", "credit", "other"}
 # Las categorías advance/vip se conservan únicamente para leer eventos históricos.
@@ -104,6 +104,10 @@ BEVERAGE_PRESENTATION_OPTIONS = (
     "botella 750 ml", "botella 1 l", "copa", "shot", "jarra", "balde", "unidad",
 )
 BEVERAGE_STOCK_UNIT_OPTIONS = ("botella", "lata", "caja", "pack", "barril", "bidón", "unidad")
+
+EVENT_IMAGE_MAX_BYTES = 6 * 1024 * 1024
+EVENT_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
+EVENT_IMAGE_MIME_TYPES = {"image/jpeg", "image/png", "image/webp"}
 
 PAYMENT_LABELS = {
     "cash": "Efectivo",
@@ -437,6 +441,38 @@ def new_qr_token():
     return secrets.token_urlsafe(24)
 
 
+def validate_event_image(file_storage):
+    """Valida y devuelve una imagen de evento segura para SQLite/PostgreSQL."""
+    if not file_storage or not getattr(file_storage, "filename", ""):
+        return None, None, None
+    filename = Path(file_storage.filename).name[:180]
+    extension = Path(filename).suffix.lower()
+    if extension not in EVENT_IMAGE_EXTENSIONS:
+        raise ValueError("La imagen del evento debe ser JPG, PNG o WEBP")
+    data = file_storage.read(EVENT_IMAGE_MAX_BYTES + 1)
+    if not data:
+        raise ValueError("La imagen del evento está vacía")
+    if len(data) > EVENT_IMAGE_MAX_BYTES:
+        raise ValueError("La imagen del evento no puede superar 6 MB")
+    detected_mime = None
+    if data.startswith(b"\xff\xd8\xff"):
+        detected_mime = "image/jpeg"
+    elif data.startswith(b"\x89PNG\r\n\x1a\n"):
+        detected_mime = "image/png"
+    elif len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        detected_mime = "image/webp"
+    if detected_mime is None:
+        raise ValueError("El archivo no contiene una imagen válida")
+    extension_matches = (
+        (extension in {".jpg", ".jpeg"} and detected_mime == "image/jpeg")
+        or (extension == ".png" and detected_mime == "image/png")
+        or (extension == ".webp" and detected_mime == "image/webp")
+    )
+    if not extension_matches:
+        raise ValueError("La extensión del archivo no coincide con la imagen")
+    return data, detected_mime, filename
+
+
 def find_promoter_by_key(db, normalized_key):
     for promoter in db.execute("SELECT * FROM promoters ORDER BY id").fetchall():
         stored_key = promoter["normalized_name"] if "normalized_name" in promoter.keys() else None
@@ -546,6 +582,9 @@ def init_db():
                 event_name TEXT NOT NULL DEFAULT 'Noche Floki',
                 event_date TEXT NOT NULL DEFAULT '',
                 capacity INTEGER NOT NULL DEFAULT 0,
+                event_image_data BYTEA,
+                event_image_mime TEXT,
+                event_image_name TEXT,
                 FOREIGN KEY(opened_by) REFERENCES users(id),
                 FOREIGN KEY(closed_by) REFERENCES users(id)
             );
@@ -736,6 +775,9 @@ def init_db():
         add_column_if_missing(db, "cash_sessions", "event_name", "TEXT NOT NULL DEFAULT 'Noche Floki'")
         add_column_if_missing(db, "cash_sessions", "capacity", "INTEGER NOT NULL DEFAULT 0")
         add_column_if_missing(db, "cash_sessions", "event_date", "TEXT NOT NULL DEFAULT ''")
+        add_column_if_missing(db, "cash_sessions", "event_image_data", "BYTEA")
+        add_column_if_missing(db, "cash_sessions", "event_image_mime", "TEXT")
+        add_column_if_missing(db, "cash_sessions", "event_image_name", "TEXT")
         add_column_if_missing(db, "users", "sector", "TEXT NOT NULL DEFAULT 'ticketing'")
         add_column_if_missing(db, "movements", "promoter_id", "INTEGER")
         add_column_if_missing(db, "movements", "sector", "TEXT NOT NULL DEFAULT 'ticketing'")
@@ -1266,18 +1308,73 @@ def open_cash():
             date.fromisoformat(event_date)
         except ValueError as exc:
             raise ValueError("Elegí una fecha válida para el evento") from exc
+        event_image_data, event_image_mime, event_image_name = validate_event_image(request.files.get("event_image"))
     except ValueError as exc:
         flash(str(exc), "error")
         return redirect(url_for("dashboard"))
     db = get_db()
     cursor = db.execute(
-        "INSERT INTO cash_sessions(opened_at, opened_by, opening_amount, status, event_name, event_date, capacity) VALUES (?, ?, ?, 'open', ?, ?, ?)",
-        (now_iso(), g.user["id"], opening_amount, event_name, event_date, capacity),
+        """INSERT INTO cash_sessions(
+               opened_at, opened_by, opening_amount, status, event_name, event_date, capacity,
+               event_image_data, event_image_mime, event_image_name
+           ) VALUES (?, ?, ?, 'open', ?, ?, ?, ?, ?, ?)""",
+        (
+            now_iso(), g.user["id"], opening_amount, event_name, event_date, capacity,
+            event_image_data, event_image_mime, event_image_name,
+        ),
     )
     initialize_event_stock(db, cursor.lastrowid, g.user["id"])
     db.commit()
     flash("Evento y caja creados correctamente.", "success")
     return redirect(url_for("dashboard"))
+
+
+@app.get("/events/<int:session_id>/banner")
+@login_required
+def event_banner(session_id):
+    cash = get_db().execute(
+        "SELECT event_image_data, event_image_mime FROM cash_sessions WHERE id=?",
+        (session_id,),
+    ).fetchone()
+    if not cash:
+        abort(404)
+    data = cash["event_image_data"]
+    if not data:
+        return send_from_directory(app.static_folder, "img/floki-club-bg.jpg", mimetype="image/jpeg")
+    response = Response(bytes(data), mimetype=cash["event_image_mime"] or "image/jpeg")
+    response.headers["Cache-Control"] = "private, max-age=60"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    return response
+
+
+@app.post("/events/<int:session_id>/banner")
+@admin_required
+def update_event_banner(session_id):
+    db = get_db()
+    cash = db.execute("SELECT id, status FROM cash_sessions WHERE id=?", (session_id,)).fetchone()
+    if not cash:
+        abort(404)
+    action = request.form.get("banner_action", "replace")
+    try:
+        if action == "remove":
+            db.execute(
+                "UPDATE cash_sessions SET event_image_data=NULL, event_image_mime=NULL, event_image_name=NULL WHERE id=?",
+                (session_id,),
+            )
+            flash("Imagen del evento eliminada. Se usa el banner Floki predeterminado.", "success")
+        else:
+            data, mimetype, filename = validate_event_image(request.files.get("event_image"))
+            if not data:
+                raise ValueError("Elegí una imagen para reemplazar el banner")
+            db.execute(
+                "UPDATE cash_sessions SET event_image_data=?, event_image_mime=?, event_image_name=? WHERE id=?",
+                (data, mimetype, filename, session_id),
+            )
+            flash("Banner del evento actualizado.", "success")
+        db.commit()
+    except ValueError as exc:
+        flash(str(exc), "error")
+    return redirect(request.form.get("return_to") or url_for("dashboard"))
 
 
 @app.post("/movements/sale")

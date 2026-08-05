@@ -80,7 +80,7 @@ https://TU-DOMINIO/health
 El resultado correcto es parecido a:
 
 ```json
-{"status":"ok","version":"2.5.0","database":"postgresql"}
+{"status":"ok","version":"2.5.1","database":"postgresql"}
 ```
 
 Después abrí la URL principal e ingresá con el administrador.
