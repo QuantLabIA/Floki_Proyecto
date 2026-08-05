@@ -1,0 +1,44 @@
+{% extends 'base.html' %}
+{% block title %}Ingresar · Floki Manager{% endblock %}
+{% block content %}
+<section class="login-experience">
+  <div class="login-showcase">
+    <div class="login-showcase-overlay"></div>
+    <div class="login-brand-content">
+      <img src="{{ url_for('static', filename='img/floki-login-viking.png') }}" alt="Floki Club" class="login-brand-logo login-viking-logo">
+      <p class="login-wordmark">FLOKI MANAGER</p>
+      <p>Gestioná tu club. Elevá la experiencia.</p>
+    </div>
+  </div>
+
+  <section class="login-card">
+    <div class="login-mobile-brand">
+      <img src="{{ url_for('static', filename='img/floki-login-viking.png') }}" alt="Floki Club">
+      <span>FLOKI MANAGER</span>
+    </div>
+    <p class="eyebrow">BIENVENIDO DE NUEVO</p>
+    <h1>Control total de tu noche</h1>
+    <p class="muted">Ingresá para administrar la caja, los accesos y el stock de Floki.</p>
+
+    <form method="post" class="stack-form login-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <label>Usuario
+        <span class="input-shell"><span class="input-icon">♙</span><input name="username" autocomplete="username" required autofocus placeholder="Ingresá tu usuario"></span>
+      </label>
+      <label>Contraseña
+        <span class="input-shell"><span class="input-icon">⌑</span><input id="login-password" type="password" name="password" autocomplete="current-password" required placeholder="Ingresá tu contraseña"><button type="button" class="password-toggle" data-password-toggle="login-password" aria-label="Mostrar contraseña">◉</button></span>
+      </label>
+      <label class="remember-line"><span><input type="checkbox" name="remember"> Recordarme</span></label>
+      <button class="primary-button full login-button" type="submit">INICIAR SESIÓN</button>
+    </form>
+
+    <details class="demo-help">
+      <summary>Ver usuarios de prueba</summary>
+      <p><strong>Administrador:</strong> admin / admin123</p>
+      <p><strong>Boletería:</strong> cajero / floki123</p>
+      <p><strong>Bebidas:</strong> bebidas / floki123</p>
+    </details>
+    <footer class="login-footer">CONTROL TOTAL · EXPERIENCIA FLOKI<br><small>Versión {{ app_version }}</small></footer>
+  </section>
+</section>
+{% endblock %}

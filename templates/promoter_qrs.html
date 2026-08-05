@@ -1,0 +1,31 @@
+{% extends 'base.html' %}
+{% block title %}Códigos QR · Floki Manager{% endblock %}
+{% block content %}
+<section class="page-heading">
+  <div><p class="eyebrow">PROMOTORES</p><h1>Códigos QR</h1><p class="muted">Cada promotor tiene un código distinto. Todos se renuevan automáticamente cuando se cierra la caja.</p></div>
+  <a class="secondary-button" href="{{ url_for('promoter_lists') }}">Volver a listas</a>
+</section>
+
+<section class="qr-info-banner card">
+  <strong>Cómo se utiliza</strong>
+  <p>Compartí cada imagen con su promotor. En la puerta, el cajero escanea el QR con la cámara del celular y Floki Manager abre directamente la lista correspondiente para buscar el nombre.</p>
+  {% if cash %}<small>Caja actual: {{ cash['event_name'] }}. Los QR seguirán vigentes hasta cerrar esta caja.</small>{% else %}<small>No hay caja abierta. Estos códigos quedan preparados para la próxima jornada.</small>{% endif %}
+</section>
+
+<section class="qr-card-grid">
+  {% for promoter in promoters %}
+  <article class="card promoter-qr-card" id="promotor-{{ promoter['id'] }}">
+    <div class="qr-card-heading">
+      <span><small>PROMOTOR</small><strong>{{ promoter['name'] }}</strong></span>
+      {% if cash %}<b>{{ promoter['listed_count'] }} en lista</b>{% endif %}
+    </div>
+    <img src="{{ url_for('promoter_qr_image', token=promoter['qr_token']) }}" alt="Código QR de {{ promoter['name'] }}" width="320" height="320">
+    <p class="qr-validity">Código actualizado: {{ promoter['qr_updated_at']|datetime_ar }}</p>
+    <div class="qr-actions">
+      <a class="primary-button" href="{{ url_for('promoter_qr_image', token=promoter['qr_token'], download=1) }}">Descargar imagen</a>
+      <button class="secondary-button" type="button" data-share-qr data-share-url="{{ promoter_public_url(promoter['qr_token']) }}" data-share-name="{{ promoter['name'] }}">Compartir enlace</button>
+    </div>
+  </article>
+  {% else %}<article class="card"><p class="muted">Todavía no hay promotores activos.</p></article>{% endfor %}
+</section>
+{% endblock %}

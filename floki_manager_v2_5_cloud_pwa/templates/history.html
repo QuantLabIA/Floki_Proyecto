@@ -1,0 +1,19 @@
+{% extends 'base.html' %}
+{% block title %}Historial · Floki Manager{% endblock %}
+{% block content %}
+<section class="page-heading"><div><p class="eyebrow">ADMINISTRACIÓN</p><h1>Historial de eventos</h1><p class="muted">Solo el administrador puede ver resultados, ganancias y eliminar jornadas.</p></div></section>
+<section class="card filter-card">
+  <form method="get" class="filter-form"><label>Desde<input type="date" name="from" value="{{ filters['from'] }}"></label><label>Hasta<input type="date" name="to" value="{{ filters['to'] }}"></label><label>Estado<select name="status"><option value="">Todos</option><option value="open" {% if filters['status']=='open' %}selected{% endif %}>Abierta</option><option value="closed" {% if filters['status']=='closed' %}selected{% endif %}>Cerrada</option></select></label><button class="primary-button" type="submit">Filtrar</button><a class="secondary-button" href="{{ url_for('history') }}">Limpiar</a></form>
+</section>
+<section class="card history-list-card"><div class="history-list">
+  {% if sessions %}{% for cash in sessions %}
+  <div class="history-row-wrap">
+    <a class="history-row" href="{{ url_for('session_detail', session_id=cash['id']) }}">
+      <div><strong>{{ cash['event_name'] }} · Caja #{{ cash['id'] }}</strong><small>Evento: {{ cash['event_date']|date_ar }} · abierta {{ cash['opened_at']|datetime_ar }} por {{ cash['opened_by_name'] }}</small></div>
+      <div class="history-numbers"><span>Ventas {{ cash['sales']|money }}</span><span>Gastos {{ cash['expenses']|money }}</span><span>{{ cash['people_count'] }} ingresos</span></div><span class="status-pill {{ cash['status'] }}">{{ 'Abierta' if cash['status']=='open' else 'Cerrada' }}</span>
+    </a>
+    {% if cash['status']=='closed' %}<form action="{{ url_for('delete_cash_session', session_id=cash['id']) }}" method="post" data-confirm="¿Eliminar definitivamente {{ cash['event_name'] }} y todos sus movimientos? Se creará un respaldo antes."><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="tiny-danger delete-event-button" type="submit">Eliminar evento</button></form>{% endif %}
+  </div>
+  {% endfor %}{% else %}<p class="muted padded">No hay eventos para los filtros elegidos.</p>{% endif %}
+</div></section>
+{% endblock %}

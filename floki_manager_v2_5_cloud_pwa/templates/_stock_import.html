@@ -1,0 +1,20 @@
+<section class="card smart-stock-import {% if compact_stock_panel %}compact-import{% endif %}">
+  <div class="section-heading compact">
+    <div>
+      <p class="eyebrow">CARGA INTELIGENTE DE STOCK</p>
+      <h2>{{ smart_stock_title|default('Subir stock inicial') }}</h2>
+      <p class="muted compact-copy">Subí un PDF o Excel con bebida y cantidad. Floki categoriza tipo, marca, presentación y unidad de stock.</p>
+    </div>
+    <a class="text-link" href="{{ url_for('stock') }}">Abrir stock</a>
+  </div>
+  <form action="{{ url_for('import_stock') }}" method="post" enctype="multipart/form-data" class="stock-import-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="return_to" value="{{ smart_stock_return|default('dashboard') }}">
+    <label class="file-drop stock-file-drop">PDF o Excel (.xlsx)
+      <input type="file" name="stock_file" accept=".pdf,.xlsx" required>
+      <span>Elegir planilla</span>
+    </label>
+    <button class="primary-button" type="submit">Categorizar y cargar stock</button>
+  </form>
+  <p class="field-help">Las variantes desconocidas se crean con precio provisorio de $1.000 para que puedas revisarlas antes de vender.</p>
+</section>

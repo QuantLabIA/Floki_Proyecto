@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#08060d">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Floki Manager">
+  <meta name="description" content="Floki Manager · Administración de caja, accesos y stock">
+  <link rel="manifest" href="{{ url_for('manifest') }}">
+  <link rel="icon" href="{{ url_for('static', filename='icons/icon-192.png') }}" type="image/png">
+  <link rel="apple-touch-icon" href="{{ url_for('static', filename='icons/icon-192.png') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+  <title>{% block title %}Floki Manager{% endblock %}</title>
+</head>
+<body class="{% if not g.user %}auth-page{% else %}app-page role-{{ g.user['role'] }} sector-{{ current_sector }}{% endif %}">
+  <div class="ambient ambient-one" aria-hidden="true"></div>
+  <div class="ambient ambient-two" aria-hidden="true"></div>
+
+  <div class="pwa-controls" aria-live="polite">
+    <span class="network-status online" data-network-status><i></i><span>En línea</span></span>
+    <button type="button" class="install-app-button" data-install-app hidden>Instalar app</button>
+  </div>
+
+  {% if g.user %}
+  {% set endpoint = request.endpoint or '' %}
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="brand" href="{{ url_for('dashboard') }}" aria-label="Ir al inicio">
+        <img src="{{ url_for('static', filename='img/floki-logo-white.png') }}" alt="Floki Club" class="brand-logo">
+        <span class="brand-copy"><strong>FLOKI</strong><small>Manager v{{ app_version }}</small></span>
+      </a>
+
+      <nav class="desktop-nav" aria-label="Navegación principal">
+        <a class="{% if endpoint=='dashboard' %}active{% endif %}" href="{{ url_for('dashboard') }}"><span class="nav-symbol">⌂</span>{{ 'Dashboard' if g.user['role']=='admin' else sector_labels.get(current_sector, 'Caja') }}</a>
+        {% if g.user['role']=='admin' or current_sector=='ticketing' %}<a class="{% if endpoint in ['promoter_lists','promoter_qrs'] %}active{% endif %}" href="{{ url_for('promoter_lists') }}"><span class="nav-symbol">☆</span>Listas RRPP</a>{% endif %}
+        {% if g.user['role']=='admin' or current_sector=='beverages' %}<a class="{% if endpoint=='stock' %}active{% endif %}" href="{{ url_for('stock') }}"><span class="nav-symbol">▦</span>Stock</a>{% endif %}
+        {% if g.user['role']=='admin' %}<a class="{% if endpoint in ['history','session_detail'] %}active{% endif %}" href="{{ url_for('history') }}"><span class="nav-symbol">◷</span>Historial</a>{% endif %}
+        <a class="{% if endpoint=='settings' %}active{% endif %}" href="{{ url_for('settings') }}"><span class="nav-symbol">⚙</span>{{ 'Configuración' if g.user['role']=='admin' else 'Mi cuenta' }}</a>
+      </nav>
+
+      <div class="user-chip">
+        <span class="user-avatar">{{ g.user['name'][:1]|upper }}</span>
+        <span class="user-copy"><strong>{{ 'Administrador' if g.user['role']=='admin' else sector_labels.get(current_sector, 'Caja') }} - {{ g.user['name'] }}</strong><small><i></i>@{{ g.user['username'] }}</small></span>
+        <form action="{{ url_for('logout') }}" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="link-button" type="submit" aria-label="Cerrar sesión">Salir</button></form>
+      </div>
+    </div>
+  </header>
+  {% endif %}
+
+  <main class="page-shell {% if not g.user %}auth-shell{% endif %}">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}<div class="flash-stack">{% for category, message in messages %}<div class="flash {{ category }}">{{ message }}</div>{% endfor %}</div>{% endif %}
+    {% endwith %}
+    {% block content %}{% endblock %}
+  </main>
+
+  {% if g.user %}
+  {% set endpoint = request.endpoint or '' %}
+  <nav class="mobile-nav {% if g.user['role']=='admin' %}five-items{% else %}three-items{% endif %}" aria-label="Navegación móvil">
+    <a class="{% if endpoint=='dashboard' %}active{% endif %}" href="{{ url_for('dashboard') }}"><span>⌂</span><small>Caja</small></a>
+    {% if g.user['role']=='admin' or current_sector=='ticketing' %}<a class="{% if endpoint in ['promoter_lists','promoter_qrs'] %}active{% endif %}" href="{{ url_for('promoter_lists') }}"><span>☆</span><small>Listas</small></a>{% endif %}
+    {% if g.user['role']=='admin' or current_sector=='beverages' %}<a class="{% if endpoint=='stock' %}active{% endif %}" href="{{ url_for('stock') }}"><span>▦</span><small>Stock</small></a>{% endif %}
+    {% if g.user['role']=='admin' %}<a class="{% if endpoint in ['history','session_detail'] %}active{% endif %}" href="{{ url_for('history') }}"><span>◷</span><small>Historial</small></a>{% endif %}
+    <a class="{% if endpoint=='settings' %}active{% endif %}" href="{{ url_for('settings') }}"><span>⚙</span><small>{{ 'Ajustes' if g.user['role']=='admin' else 'Cuenta' }}</small></a>
+  </nav>
+  {% endif %}
+
+  <script src="{{ url_for('static', filename='js/app.js') }}" defer></script>
+</body>
+</html>

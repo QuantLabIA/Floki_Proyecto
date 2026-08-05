@@ -1,0 +1,91 @@
+{% extends 'base.html' %}
+{% block title %}Configuración · Floki Manager{% endblock %}
+{% block content %}
+<section class="page-heading"><div><p class="eyebrow">{{ 'ADMINISTRACIÓN' if g.user['role']=='admin' else 'MI CUENTA' }}</p><h1>{{ 'Configuración' if g.user['role']=='admin' else 'Mi cuenta' }}</h1><p class="muted">{{ 'Precios automáticos, bebidas, promotores, códigos QR, usuarios y respaldos.' if g.user['role']=='admin' else 'Actualizá la seguridad de tu acceso.' }}</p></div></section>
+
+<section class="settings-grid">
+  {% if g.user['role'] == 'admin' %}
+  <article class="card wide-card">
+    <div class="section-heading"><div><p class="eyebrow">PRECIOS DE ENTRADAS</p><h2>Antes y después del horario</h2><p class="muted compact-copy">La caja elige automáticamente el precio de la entrada general. FREE se confirma exclusivamente desde las listas; VIP y anticipada fueron eliminadas.</p></div></div>
+    <form action="{{ url_for('update_prices') }}" method="post" class="stack-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <div class="pricing-table">
+        <div class="pricing-head"><span>Entrada</span><span>Cambia a las</span><span>Antes</span><span>Después</span></div>
+        {% for item in entry_prices %}
+        <div class="pricing-row">
+          <strong>{{ item['label'] }}</strong>
+          <input type="time" name="cutoff_{{ item['category'] }}" value="{{ item['cutoff_time'] }}">
+          <select name="before_{{ item['category'] }}">{% for price in price_options %}<option value="{{ price }}" {% if price == item['before_price'] %}selected{% endif %}>{{ price|money }}</option>{% endfor %}</select>
+          <select name="after_{{ item['category'] }}">{% for price in price_options %}<option value="{{ price }}" {% if price == item['after_price'] %}selected{% endif %}>{{ price|money }}</option>{% endfor %}</select>
+        </div>
+        {% endfor %}
+      </div>
+
+      <div class="section-heading subsection-heading"><div><p class="eyebrow">BOLETERÍA</p><h2>Guardarropa</h2><p class="muted compact-copy">Se muestra como botón de venta rápida en la caja de boletería.</p></div></div>
+      <div class="beverage-settings-list">
+        {% for product in ticketing_products %}
+        <div class="beverage-setting-row {% if not product['active'] %}inactive-row{% endif %}">
+          <span><strong>{{ product['name'] }}</strong><small>Venta rápida de boletería</small></span>
+          <select name="ticketing_{{ product['id'] }}">{% for price in price_options if price > 0 %}<option value="{{ price }}" {% if price == product['price'] %}selected{% endif %}>{{ price|money }}</option>{% endfor %}</select>
+        </div>
+        {% endfor %}
+      </div>
+
+      <div class="section-heading subsection-heading"><div><p class="eyebrow">BEBIDAS</p><h2>Catálogo de variantes</h2><p class="muted compact-copy">Cada combinación de bebida, marca y presentación es un botón independiente con su propio precio. Así, por ejemplo, Cerveza Quilmes en lata y en vaso no se mezclan.</p></div></div>
+      <div class="beverage-settings-list beverage-config-list">
+        <div class="beverage-config-head no-yield"><span>Variante</span><span>Precio</span><span>Stock</span><span>Presentación</span><span>Estado</span></div>
+        {% for beverage in beverages %}
+        <div class="beverage-setting-row beverage-config-row no-yield {% if not beverage['active'] %}inactive-row{% endif %}">
+          <span><strong>{{ beverage['name'] }}</strong><small>{{ beverage['beverage_type'] }} · {{ beverage['brand'] }} · {{ 'Activa' if beverage['active'] else 'Inactiva' }}</small></span>
+          <select name="beverage_{{ beverage['id'] }}">{% for price in price_options if price > 0 %}<option value="{{ price }}" {% if price == beverage['price'] %}selected{% endif %}>{{ price|money }}</option>{% endfor %}</select>
+          <select name="stock_unit_{{ beverage['id'] }}">{% if beverage['stock_unit'] not in beverage_stock_unit_options %}<option value="{{ beverage['stock_unit'] }}" selected>{{ beverage['stock_unit']|title }}</option>{% endif %}{% for option in beverage_stock_unit_options %}<option value="{{ option }}" {% if option == beverage['stock_unit'] %}selected{% endif %}>{{ option|title }}</option>{% endfor %}</select>
+          <select name="sale_unit_{{ beverage['id'] }}">{% if beverage['sale_unit'] not in beverage_presentation_options %}<option value="{{ beverage['sale_unit'] }}" selected>{{ beverage['sale_unit']|title }}</option>{% endif %}{% for option in beverage_presentation_options %}<option value="{{ option }}" {% if option == beverage['sale_unit'] %}selected{% endif %}>{{ option|title }}</option>{% endfor %}</select>
+          <button class="secondary-button small-button" type="submit" formaction="{{ url_for('toggle_beverage', beverage_id=beverage['id']) }}" formmethod="post">{{ 'Desactivar' if beverage['active'] else 'Activar' }}</button>
+        </div>
+        {% else %}<p class="muted">Todavía no hay variantes de bebidas.</p>{% endfor %}
+      </div>
+      <button class="primary-button" type="submit">Guardar precios y presentaciones</button>
+    </form>
+
+    <form action="{{ url_for('create_beverage') }}" method="post" class="add-beverage-form beverage-create-form catalog-beverage-form" data-beverage-builder>
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <div class="beverage-builder-preview"><span>Botón que se creará</span><strong data-beverage-preview>Cerveza · Vaso</strong></div>
+      <label>Tipo de bebida<select name="beverage_type" required data-beverage-type>{% for option in beverage_type_options %}<option value="{{ option }}">{{ option }}</option>{% endfor %}</select></label>
+      <label>Marca<select name="brand_choice" required data-beverage-brand>{% for option in beverage_brand_options %}<option value="{{ option }}">{{ option }}</option>{% endfor %}<option value="__custom__">Otra marca…</option></select></label>
+      <label data-custom-brand-field hidden>Marca personalizada<input name="custom_brand" maxlength="40" placeholder="Ej.: Otra marca" data-custom-brand></label>
+      <label>Presentación de venta<select name="presentation" required data-beverage-presentation>{% for option in beverage_presentation_options %}<option value="{{ option }}">{{ option|title }}</option>{% endfor %}</select></label>
+      <label>Cómo se cuenta el stock<select name="stock_unit" required>{% for option in beverage_stock_unit_options %}<option value="{{ option }}">{{ option|title }}</option>{% endfor %}</select></label>
+      <label>Precio<select name="price">{% for price in price_options if price > 0 %}<option value="{{ price }}">{{ price|money }}</option>{% endfor %}</select></label>
+      <label>Orden<input type="number" name="sort_order" min="0" max="10000" value="100"></label>
+      <button class="secondary-button" type="submit">Agregar variante</button>
+    </form>
+  </article>
+
+  <article class="card">
+    <div class="section-heading"><div><p class="eyebrow">RRPP</p><h2>Promotores principales</h2></div><span class="section-link-group"><a href="{{ url_for('promoter_lists') }}">Cargar listas</a><a href="{{ url_for('promoter_qrs') }}">Ver QR</a></span></div>
+    <form action="{{ url_for('create_promoter') }}" method="post" class="inline-create-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input name="name" placeholder="Nombre del promotor" maxlength="80" required><button class="primary-button" type="submit">Agregar</button>
+    </form>
+    <div class="admin-list">
+      {% for promoter in promoters %}<div><span><strong>{{ promoter['name'] }}</strong><small>{{ 'Activo' if promoter['active'] else 'Inactivo' }}</small></span><form action="{{ url_for('toggle_promoter', promoter_id=promoter['id']) }}" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="secondary-button small-button" type="submit">{{ 'Desactivar' if promoter['active'] else 'Activar' }}</button></form></div>{% else %}<p class="muted">Todavía no hay promotores.</p>{% endfor %}
+    </div>
+  </article>
+
+  <article class="card wide-card">
+    <div class="section-heading"><div><p class="eyebrow">USUARIOS</p><h2>Accesos al sistema</h2></div></div>
+    <form action="{{ url_for('create_user') }}" method="post" class="user-create-grid">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <label>Nombre<input name="name" required maxlength="80"></label><label>Usuario<input name="username" required maxlength="40" autocomplete="off"></label><label>Contraseña<input type="password" name="password" required minlength="6" autocomplete="new-password"></label><label>Rol<select name="role" data-user-role><option value="cashier">Cajero</option><option value="admin">Administrador</option></select></label><label>Sector<select name="sector" data-user-sector><option value="ticketing">Caja de boletería</option><option value="beverages">Caja de bebidas</option></select></label><button class="primary-button" type="submit">Crear usuario</button>
+    </form>
+    <div class="admin-list user-list">{% for user in users %}<div class="editable-user-row"><span><strong>{{ 'Administrador' if user['role']=='admin' else sector_labels.get(user['sector'], 'Caja') }}</strong><small>@{{ user['username'] }} · {{ 'Activo' if user['active'] else 'Inactivo' }}</small></span><form action="{{ url_for('update_user_name', user_id=user['id']) }}" method="post" class="inline-name-form"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input name="name" value="{{ user['name'] }}" maxlength="80" required aria-label="Nombre visible"><button class="secondary-button small-button" type="submit">Guardar nombre</button></form>{% if user['id'] != g.user['id'] %}<form action="{{ url_for('toggle_user', user_id=user['id']) }}" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="secondary-button small-button" type="submit">{{ 'Desactivar' if user['active'] else 'Activar' }}</button></form>{% endif %}</div>{% endfor %}</div>
+  </article>
+  {% endif %}
+
+  <article class="card">
+    <div class="section-heading"><div><p class="eyebrow">SEGURIDAD</p><h2>Cambiar mi contraseña</h2></div></div>
+    <form action="{{ url_for('change_password') }}" method="post" class="stack-form"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><label>Contraseña actual<input type="password" name="current_password" required></label><label>Nueva contraseña<input type="password" name="new_password" minlength="6" required></label><button class="primary-button" type="submit">Actualizar contraseña</button></form>
+  </article>
+
+  {% if g.user['role'] == 'admin' %}<article class="card"><div class="section-heading"><div><p class="eyebrow">DATOS</p><h2>Respaldos SQLite</h2></div></div><p class="muted">Se crea uno automáticamente en cada cierre. También podés generarlo ahora.</p><form action="{{ url_for('manual_backup') }}" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="primary-button full" type="submit">Crear respaldo ahora</button></form><div class="backup-list">{% for backup in backups %}<small>{{ backup.name }}</small>{% else %}<small>Aún no hay respaldos.</small>{% endfor %}</div></article>{% endif %}
+</section>
+{% endblock %}

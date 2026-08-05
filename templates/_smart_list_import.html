@@ -1,0 +1,25 @@
+<section class="card smart-list-import {% if compact_list_panel %}compact-import{% endif %}">
+  <div class="section-heading compact">
+    <div>
+      <p class="eyebrow">PANEL INTELIGENTE DE LISTAS</p>
+      <h2>{{ smart_list_title|default('Agregar personas sin entrar a otro apartado') }}</h2>
+      <p class="muted compact-copy">Pegá el mensaje de WhatsApp/WPS o subí un PDF/DOCX. El sistema detecta promotores, PROMOS y Lista común automáticamente.</p>
+    </div>
+    <a class="text-link" href="{{ url_for('promoter_lists') }}">Ver listas</a>
+  </div>
+  <form action="{{ url_for('quick_import_promoter_lists') }}" method="post" enctype="multipart/form-data" class="smart-import-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="return_to" value="{{ smart_list_return|default('dashboard') }}">
+    <label class="smart-text-label">Pegar mensaje
+      <textarea name="source_text" rows="{{ 7 if compact_list_panel else 10 }}" maxlength="100000" placeholder="CINTIA DÍAZ&#10;Pilar Tutti&#10;Ingrid Becerra&#10;&#10;PROMOS&#10;Ana Gómez"></textarea>
+    </label>
+    <div class="smart-import-bottom">
+      <label class="file-drop">Archivo PDF o DOCX
+        <input type="file" name="master_file" accept=".pdf,.docx">
+        <span>Elegir archivo</span>
+      </label>
+      <button class="primary-button" type="submit">Procesar y cargar listas</button>
+    </div>
+    <p class="field-help">Podés usar texto o archivo. Se actualizan únicamente las listas incluidas y el panel queda vacío automáticamente.</p>
+  </form>
+</section>

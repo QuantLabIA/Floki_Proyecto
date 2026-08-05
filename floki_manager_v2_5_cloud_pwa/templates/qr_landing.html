@@ -1,0 +1,26 @@
+{% extends 'base.html' %}
+{% block title %}Validación QR · Floki Manager{% endblock %}
+{% block content %}
+<section class="qr-public-shell">
+  <article class="card qr-public-card {% if not promoter %}invalid-qr{% endif %}">
+    <img class="qr-public-mark" src="{{ url_for('static', filename='img/floki-logo-white.png') }}" alt="Floki Club">
+    {% if promoter %}
+      <p class="eyebrow">CÓDIGO VÁLIDO</p>
+      <h1>{{ promoter['name'] }}</h1>
+      {% if cash %}
+        <span class="qr-valid-badge">✓ Promotor identificado</span>
+        <p>Este QR corresponde a la lista de <strong>{{ promoter['name'] }}</strong> para <strong>{{ cash['event_name'] }}</strong>.</p>
+        <p class="muted">Actualmente tiene {{ listed_count }} personas cargadas. Para confirmar la entrada FREE, el personal debe iniciar sesión y buscar el nombre en esta lista.</p>
+      {% else %}
+        <span class="qr-valid-badge">✓ Código preparado</span>
+        <p>Este QR pertenece a <strong>{{ promoter['name'] }}</strong> y quedará disponible para la próxima jornada.</p>
+      {% endif %}
+      {% if not g.user %}<a class="primary-button full" href="{{ url_for('login', next=request.path) }}">Ingresar como personal de Floki</a>{% endif %}
+    {% else %}
+      <p class="eyebrow">CÓDIGO NO VÁLIDO</p>
+      <h1>QR vencido</h1>
+      <p>Este código fue reemplazado al cerrar una caja o no pertenece a un promotor activo.</p>
+    {% endif %}
+  </article>
+</section>
+{% endblock %}

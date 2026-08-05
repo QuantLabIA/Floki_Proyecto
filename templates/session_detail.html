@@ -1,0 +1,87 @@
+{% extends 'base.html' %}
+{% block title %}Caja #{{ cash['id'] }} · Floki Manager{% endblock %}
+{% block content %}
+<section class="page-heading report-heading">
+  <div><p class="eyebrow">REPORTE DE CAJA #{{ cash['id'] }}</p><h1>{{ cash['event_name'] }}</h1><p class="muted">Evento {{ cash['event_date']|date_ar }} · abierta {{ cash['opened_at']|datetime_ar }} por {{ cash['opened_by_name'] }}</p></div>
+  <div class="button-row">
+    <a class="secondary-button" href="{{ url_for('session_print', session_id=cash['id']) }}" target="_blank">Imprimir / PDF</a>
+    <a class="secondary-button" href="{{ url_for('export_stock_xlsx', session_id=cash['id']) }}">Excel de stock</a><a class="primary-button" href="{{ url_for('export_session_csv', session_id=cash['id']) }}">Exportar CSV</a>
+  </div>
+</section>
+
+<section class="metric-grid">
+  <article class="metric-card"><span>Ventas</span><strong>{{ totals['sales']|money }}</strong><small>Bruto</small></article>
+  <article class="metric-card"><span>Gastos</span><strong>{{ totals['expenses']|money }}</strong><small>Salidas</small></article>
+  <article class="metric-card"><span>Ingresos</span><strong>{{ totals['people_count'] }}</strong><small>{{ totals['paid_count'] }} pagos · {{ totals['free_count'] }} free</small></article>
+  <article class="metric-card"><span>Resultado</span><strong>{{ (totals['sales'] - totals['expenses'])|money }}</strong><small>Ventas menos gastos</small></article>
+</section>
+
+<section class="report-grid">
+  <article class="card">
+    <div class="section-heading"><div><p class="eyebrow">CIERRE</p><h2>Control de efectivo</h2></div></div>
+    <div class="summary-lines">
+      <div><span>Monto inicial</span><strong>{{ cash['opening_amount']|money }}</strong></div>
+      <div><span>Ventas en efectivo</span><strong>{{ totals['cash_sales']|money }}</strong></div>
+      <div><span>Gastos en efectivo</span><strong>−{{ totals['cash_expenses']|money }}</strong></div>
+      <div><span>Efectivo esperado</span><strong>{{ expected_cash|money }}</strong></div>
+      {% if cash['status']=='closed' %}
+      <div><span>Efectivo declarado</span><strong>{{ cash['declared_cash']|money }}</strong></div>
+      <div><span>Diferencia</span><strong class="{% if cash['difference'] < 0 %}text-red{% elif cash['difference'] > 0 %}text-green{% endif %}">{{ cash['difference']|money }}</strong></div>
+      {% endif %}
+    </div>
+  </article>
+
+  <article class="card">
+    <div class="section-heading"><div><p class="eyebrow">MEDIOS DE PAGO</p><h2>Ventas y gastos</h2></div></div>
+    <div class="payment-list">
+      {% for row in by_payment %}<div><span>{{ payment_labels[row['payment_method']] }}</span><strong>{{ row['net']|money }}</strong></div>{% else %}<p class="muted">Sin movimientos.</p>{% endfor %}
+    </div>
+  </article>
+
+  <article class="card">
+    <div class="section-heading"><div><p class="eyebrow">RRPP</p><h2>Ranking de ingresos</h2></div></div>
+    <div class="promoter-ranking">
+      {% for row in promoters %}<div><span><strong>{{ loop.index }}.</strong> {{ row['name'] }}</span><b>{{ row['people_count'] }} personas</b></div>{% else %}<p class="muted">Sin ingresos vinculados.</p>{% endfor %}
+    </div>
+  </article>
+</section>
+
+<section class="card inventory-report-card">
+  <div class="section-heading"><div><p class="eyebrow">MERCADERÍA</p><h2>Stock de bebidas</h2></div><a href="{{ url_for('stock', session_id=cash['id']) }}">Abrir planilla</a></div>
+  <div class="stock-table-wrap">
+    <div class="stock-table stock-report-auto stock-head"><span>Bebida</span><span>Inicial</span><span>Vendidas</span><span>Final</span><span>Stock usado</span><span>Rendimiento real</span></div>
+    {% for row in inventory %}<div class="stock-table stock-report-auto stock-row"><strong>{{ row['beverage_name'] }}</strong><span>{{ row['initial_quantity'] }} {{ row['stock_unit'] }}</span><span>{{ row['sold_quantity'] }} {{ row['sale_unit'] }}</span><span>{{ '—' if row['final_quantity'] is none else row['final_quantity'] ~ ' ' ~ row['stock_unit'] }}</span><span>{{ '—' if row['consumed_stock'] is none else row['consumed_stock'] ~ ' ' ~ row['stock_unit'] }}</span><strong>{{ row['yield_status'] if row['observed_yield'] is none else row['observed_yield'] ~ ' ' ~ row['sale_unit'] ~ ' / ' ~ row['stock_unit'] }}</strong></div>{% else %}<p class="muted">Sin stock registrado.</p>{% endfor %}
+  </div>
+</section>
+
+<section class="card filter-card">
+  <form method="get" class="filter-form compact-filters">
+    <label>Tipo<select name="type"><option value="">Todos</option><option value="sale" {% if filters['type']=='sale' %}selected{% endif %}>Ventas</option><option value="expense" {% if filters['type']=='expense' %}selected{% endif %}>Gastos</option></select></label>
+    <label>Pago<select name="payment"><option value="">Todos</option>{% for key,label in payment_labels.items() %}<option value="{{ key }}" {% if filters['payment']==key %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+    <button class="primary-button" type="submit">Aplicar</button>
+    <a class="secondary-button" href="{{ url_for('session_detail', session_id=cash['id']) }}">Limpiar</a>
+  </form>
+</section>
+
+<section class="card movements-card">
+  <div class="section-heading"><div><p class="eyebrow">AUDITORÍA</p><h2>Movimientos</h2></div><span class="muted">{{ movements|length }} registros</span></div>
+  <div class="movement-list">
+    {% for movement in movements %}
+    <div class="movement-row {% if movement['voided'] %}voided{% endif %}">
+      <span class="movement-icon {{ movement['movement_type'] }}">{% if movement['movement_type']=='sale' %}+{% else %}−{% endif %}</span>
+      <div class="movement-main">
+        <strong>{% if movement['movement_type']=='expense' %}{{ movement['description'] }}{% else %}{{ category_labels.get(movement['category'], movement['category']) }} × {{ movement['quantity'] }}{% endif %}</strong>
+        <small>{{ movement['created_at']|datetime_ar }} · {{ payment_labels[movement['payment_method']] }} · {{ movement['user_name'] }}{% if movement['promoter_name'] %} · RRPP {{ movement['promoter_name'] }}{% endif %}{% if movement['voided'] %} · ANULADO: {{ movement['void_reason'] }}{% endif %}</small>
+      </div>
+      <strong class="movement-amount">{% if movement['movement_type']=='expense' %}−{% endif %}{{ movement['total']|money }}</strong>
+      {% if g.user['role']=='admin' and not movement['voided'] %}
+      <form action="{{ url_for('void_movement', movement_id=movement['id']) }}" method="post" data-confirm="¿Anular este movimiento?">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="reason" value="Anulado desde reporte">
+        <button class="tiny-danger" type="submit">Anular</button>
+      </form>
+      {% endif %}
+    </div>
+    {% else %}<p class="muted">No hay movimientos para esos filtros.</p>{% endfor %}
+  </div>
+</section>
+{% endblock %}

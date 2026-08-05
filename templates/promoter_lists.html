@@ -1,0 +1,75 @@
+{% extends 'base.html' %}
+{% block title %}Listas RRPP · Floki Manager{% endblock %}
+{% block content %}
+<section class="page-heading">
+  <div><p class="eyebrow">PROMOTORES / RRPP</p><h1>Listas para entrada FREE</h1><p class="muted">La entrada FREE solo se confirma desde acá y es válida para todas las listas hasta las {{ common_free_cutoff_label }}.</p></div>
+  <div class="heading-actions">{% if cash %}<span class="status-pill open">{{ cash['event_name'] }} · {{ cash['event_date']|date_ar }}</span><a class="secondary-button" href="{{ url_for('export_promoter_lists_pdf') }}">PDF por promotor</a><a class="secondary-button" href="{{ url_for('export_promoter_lists_xlsx') }}">Excel · Buscador de personas</a>{% endif %}<a class="secondary-button" href="{{ url_for('promoter_qrs') }}">Códigos QR</a></div>
+</section>
+
+{% if not cash %}
+<section class="card empty-list-card"><h2>No hay un evento abierto</h2><p class="muted">El administrador debe crear la jornada antes de cargar o utilizar las listas.</p><a class="primary-button" href="{{ url_for('dashboard') }}">Volver a Caja</a></section>
+{% else %}
+<section class="common-free-banner {% if common_free_open %}is-open{% else %}is-closed{% endif %}">
+  <strong>{% if common_free_open %}Entrada FREE disponible hasta las {{ common_free_cutoff_label }}{% else %}Entrada FREE finalizada desde las {{ common_free_cutoff_label }}{% endif %}</strong>
+  <span>{% if common_free_open %}Podés confirmar nombres de promotores, PROMOS y Lista común.{% else %}Todas las listas quedaron bloqueadas para nuevas entradas gratis.{% endif %}</span>
+</section>
+{% if g.user['role']=='admin' %}
+
+{% set compact_list_panel = false %}{% set smart_list_return = 'promoter_lists' %}{% set smart_list_title = 'Pegar o subir listas' %}{% include '_smart_list_import.html' %}
+
+<section class="card birthday-create-card">
+  <div class="section-heading"><div><p class="eyebrow">CUMPLEAÑOS CONFIRMADO</p><h2>Cumpleañero + hasta 9 amigos</h2><p class="muted compact-copy">FREE hasta las 03:30 · 50% OFF en toda la carta hasta las 03:00 · si ingresan 5 o más, reciben 1 champagne + 2 Speed.</p></div></div>
+  <form action="{{ url_for('create_birthday_list') }}" method="post" class="birthday-create-form stack-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <div class="form-grid-2">
+      <label>Nombre completo del cumpleañero<input name="birthday_name" maxlength="120" required placeholder="Ej.: Sofía Martínez"></label>
+      <label>Fecha de nacimiento<input type="date" name="birthday_date_of_birth" required></label>
+    </div>
+    <label>Nombres completos de hasta 9 amigos<textarea name="birthday_guests" rows="7" maxlength="1500" placeholder="Un nombre completo por línea&#10;Martina González&#10;Lucas Demarchi"></textarea><small class="field-help">Crear esta lista confirma la asistencia anticipadamente. El cumpleañero se agrega automáticamente.</small></label>
+    <button class="primary-button full" type="submit">Confirmar cumpleaños y crear lista</button>
+  </form>
+</section>
+{% endif %}
+
+<section class="card list-summary-card full-summary-card">
+  <div class="section-heading"><div><p class="eyebrow">RESUMEN</p><h2>Listas cargadas</h2></div><a href="{{ url_for('promoter_qrs') }}">Ver QR</a></div>
+  <div class="promoter-summary-grid">
+    {% for row in summary %}
+    <article class="promoter-summary-item {% if row['is_common'] %}common-list-item{% elif row['is_birthday'] %}birthday-list-item{% endif %}">
+      <a class="promoter-summary-main" href="{{ url_for('promoter_lists', promoter=row['id']) }}"><span><strong>{{ row['name'] }}</strong><small>{% if row['is_birthday'] %}{{ row['birthday_person_name'] }} · Nac. {{ row['birthday_date_of_birth']|date_ar }} · {% endif %}{{ row['checked_count'] }} ingresaron de {{ row['listed_count'] }}{% if row['is_birthday'] %} · máximo 10{% endif %}</small></span><b>{{ row['listed_count'] }}</b></a>
+      {% if row['is_common'] or row['is_promo'] %}<span class="no-qr-badge">Sin QR</span>{% elif row['is_birthday'] %}<span class="birthday-badge">Cumpleaños · {{ row['checked_count'] }}/5 para regalo</span><a class="qr-mini-link" href="{{ url_for('promoter_qrs') }}#promotor-{{ row['id'] }}">QR del cumple</a>{% else %}<a class="qr-mini-link" href="{{ url_for('promoter_qrs') }}#promotor-{{ row['id'] }}">QR del promotor</a>{% endif %}
+    </article>
+    {% else %}<p class="muted">Todavía no se cargaron nombres para esta jornada.</p>{% endfor %}
+  </div>
+</section>
+
+<section class="card guest-search-card">
+  <div class="section-heading"><div><p class="eyebrow">BUSCADOR RÁPIDO</p><h2>Encontrá personas de cualquier lista</h2><p class="muted compact-copy">Busca mientras escribís en promotores, cumpleaños, PROMOS y Lista común; muestra todas las listas posibles y permite confirmar el FREE.</p></div></div>
+  <div class="predictive-search" data-checkin-template="{{ url_for('check_in_guest', guest_id=0) }}" data-csrf="{{ csrf_token }}">
+    <label>Nombre de la persona<input name="predictive_name" value="{{ query }}" placeholder="Empezá a escribir: Pilar..." autocomplete="off" autofocus data-guest-predict data-suggestions-url="{{ url_for('guest_suggestions') }}"></label>
+    <div class="predictive-results" data-guest-suggestions><p class="muted">Escribí al menos una letra para buscar.</p></div>
+  </div>
+  <details class="classic-search"><summary>Usar búsqueda y filtro tradicional</summary>
+    <form method="get" action="{{ url_for('promoter_lists') }}" class="guest-filter-form details-content">
+      <label>Nombre<input name="q" value="{{ query }}" placeholder="Nombre completo" autocomplete="off"></label>
+      <label>Promotor<select name="promoter"><option value="">Todos</option>{% for promoter in promoters %}<option value="{{ promoter['id'] }}" {% if selected_promoter == promoter['id']|string %}selected{% endif %}>{{ promoter['name'] }}</option>{% endfor %}</select></label>
+      <button class="primary-button" type="submit">Buscar</button><a class="secondary-button" href="{{ url_for('promoter_lists') }}">Limpiar</a>
+    </form>
+  </details>
+
+  {% if query or selected_promoter %}
+  <div class="guest-list classic-results">
+    {% for guest in guests %}
+    <div class="guest-row {% if guest['checkin_id'] %}checked-in{% endif %}">
+      <div class="guest-status">{% if guest['checkin_id'] %}✓{% else %}○{% endif %}</div>
+      <div class="guest-main"><strong>{{ guest['guest_name'] }}</strong><small>Lista: {{ guest['promoter_name'] }}</small></div>
+      {% if guest['checkin_id'] %}<div class="guest-result"><b>Ya ingresó</b><small>Acreditado a {{ guest['credited_promoter_name'] }} · {{ guest['checked_in_at']|datetime_ar }}</small></div>
+      {% elif not common_free_open %}<div class="guest-result unavailable"><b>FREE finalizado</b><small>La entrada FREE fue válida hasta las {{ common_free_cutoff_label }}</small></div>{% if g.user['role']=='admin' %}<form action="{{ url_for('delete_guest', guest_id=guest['id']) }}" method="post" data-confirm="¿Eliminar este nombre?"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="tiny-danger" type="submit">Eliminar</button></form>{% endif %}
+      {% else %}<form action="{{ url_for('check_in_guest', guest_id=guest['id']) }}" method="post" data-confirm="¿Confirmar el ingreso de {{ guest['guest_name'] }} para {{ guest['promoter_name'] }}?"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="checkin-button" type="submit">Confirmar FREE</button></form>{% if g.user['role']=='admin' %}<form action="{{ url_for('delete_guest', guest_id=guest['id']) }}" method="post" data-confirm="¿Eliminar este nombre?"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="tiny-danger" type="submit">Eliminar</button></form>{% endif %}{% endif %}
+    </div>
+    {% else %}<p class="muted guest-empty">No se encontraron coincidencias.</p>{% endfor %}
+  </div>
+  {% endif %}
+</section>
+{% endif %}
+{% endblock %}
