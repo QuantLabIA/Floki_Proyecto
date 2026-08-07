@@ -12,7 +12,7 @@
   <link rel="manifest" href="{{ url_for('manifest') }}">
   <link rel="icon" href="{{ url_for('static', filename='icons/icon-192.png') }}" type="image/png">
   <link rel="apple-touch-icon" href="{{ url_for('static', filename='icons/icon-192.png') }}">
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css', v=app_version) }}">
   <title>{% block title %}Floki Manager{% endblock %}</title>
 </head>
 <body class="{% if not g.user %}auth-page{% else %}app-page role-{{ g.user['role'] }} sector-{{ current_sector }}{% endif %}">
@@ -70,7 +70,7 @@
   </nav>
   {% endif %}
 
-  <script src="{{ url_for('static', filename='js/app.js') }}" defer></script>
-  <script src="{{ url_for('static', filename='js/offline-sync.js') }}" defer></script>
+  <script src="{{ url_for('static', filename='js/app.js', v=app_version) }}" defer></script>
+  {% if g.user %}<script src="{{ url_for('static', filename='js/offline-sync.js', v=app_version) }}" defer></script>{% endif %}
 </body>
 </html>

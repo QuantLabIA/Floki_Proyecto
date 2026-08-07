@@ -1194,3 +1194,17 @@ select { color-scheme: dark; }
 .offline-benefit-forms summary::-webkit-details-marker { display: none; }
 .offline-benefit-forms summary small { color: var(--muted); text-align: right; }
 .offline-benefit-forms .details-content { padding: 0 14px 15px; border-top: 1px solid var(--line); }
+
+/* v2.6.1 · Compatibilidad de renderizado para equipos/GPU antiguos. */
+.auth-page .ambient { display: none; }
+.auth-page .login-card,
+.auth-page .login-experience {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+@media (prefers-reduced-transparency: reduce) {
+  .card, .metric-card, .action-card, .modal-card, .login-card, .topbar, .mobile-nav, .pwa-controls {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+}

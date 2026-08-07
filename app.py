@@ -67,7 +67,7 @@ DATA_DIR = BASE_DIR / "data"
 BACKUP_DIR = BASE_DIR / "backups"
 DATABASE = DATA_DIR / "floki.db"
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
-APP_VERSION = "2.6.0"
+APP_VERSION = "2.6.1"
 
 PAYMENT_METHODS = {"cash", "mercadopago", "transfer", "debit", "credit", "other"}
 # Las categorías advance/vip se conservan únicamente para leer eventos históricos.
@@ -177,8 +177,11 @@ def add_security_headers(response):
     response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
     response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
     offline_shell = request.path in {"/offline", "/offline-operations", "/service-worker.js", "/manifest.webmanifest"} or request.path.startswith("/static/")
-    if not offline_shell and (session.get("user_id") or request.path.startswith(("/api/", "/history", "/stock", "/promoter"))):
-        response.headers["Cache-Control"] = "no-store, private"
+    # HTML dinámico, login y datos privados nunca deben persistirse en la caché de la PWA.
+    if not offline_shell and (response.mimetype == "text/html" or session.get("user_id") or request.path.startswith(("/api/", "/history", "/stock", "/promoter", "/login", "/logout"))):
+        response.headers["Cache-Control"] = "no-store, private, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
     return response
 
 

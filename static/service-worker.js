@@ -1,4 +1,4 @@
-const VERSION = 'floki-manager-v2-6-offline-first';
+const VERSION = 'floki-manager-v2-6-1-hotfix';
 const STATIC_CACHE = `${VERSION}-static`;
 const CORE = [
   '/offline-operations',
@@ -20,25 +20,30 @@ self.addEventListener('install', (event) => {
 });
 
 self.addEventListener('activate', (event) => {
-  event.waitUntil(
-    caches.keys().then((keys) => Promise.all(
-      keys.filter((key) => key !== STATIC_CACHE).map((key) => caches.delete(key))
-    ))
-  );
-  self.clients.claim();
+  event.waitUntil(caches.keys().then((keys) => Promise.all(
+    keys.filter((key) => key !== STATIC_CACHE).map((key) => caches.delete(key))
+  )).then(() => self.clients.claim()));
 });
 
 const networkFirstNavigation = async (request) => {
+  try { return await fetch(request, { cache: 'no-store' }); }
+  catch (_) { return (await caches.match('/offline-operations')) || (await caches.match('/offline')) || Response.error(); }
+};
+
+const networkFirstAsset = async (request) => {
   try {
-    return await fetch(request, { cache: 'no-store' });
-  } catch (error) {
-    return (await caches.match('/offline-operations')) || (await caches.match('/offline')) || Response.error();
-  }
+    const response = await fetch(request, { cache: 'no-store' });
+    if (response.ok) {
+      const cache = await caches.open(STATIC_CACHE);
+      await cache.put(request, response.clone());
+    }
+    return response;
+  } catch (_) { return (await caches.match(request)) || Response.error(); }
 };
 
 const staleWhileRevalidate = async (request) => {
   const cached = await caches.match(request);
-  const network = fetch(request).then(async (response) => {
+  const network = fetch(request, { cache: 'no-store' }).then(async (response) => {
     if (response.ok) {
       const cache = await caches.open(STATIC_CACHE);
       cache.put(request, response.clone());
@@ -55,11 +60,15 @@ self.addEventListener('fetch', (event) => {
   if (url.origin !== self.location.origin) return;
 
   if (request.mode === 'navigate') {
+    if (url.pathname === '/login' || url.pathname === '/logout') return; // Red pura: sin Service Worker.
     event.respondWith(networkFirstNavigation(request));
     return;
   }
-  if (url.pathname.startsWith('/api/')) return;
-  if (url.pathname.startsWith('/static/') || CORE.includes(url.pathname)) {
-    event.respondWith(staleWhileRevalidate(request));
+
+  if (url.pathname.startsWith('/api/') || url.pathname === '/health') return;
+  if (url.pathname === '/static/css/app.css' || url.pathname === '/static/js/app.js' || url.pathname === '/static/js/offline-sync.js') {
+    event.respondWith(networkFirstAsset(request));
+    return;
   }
+  if (url.pathname.startsWith('/static/') || CORE.includes(url.pathname)) event.respondWith(staleWhileRevalidate(request));
 });
