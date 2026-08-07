@@ -37,6 +37,7 @@
         <a class="{% if endpoint=='dashboard' %}active{% endif %}" href="{{ url_for('dashboard') }}"><span class="nav-symbol">⌂</span>{{ 'Dashboard' if g.user['role']=='admin' else sector_labels.get(current_sector, 'Caja') }}</a>
         {% if g.user['role']=='admin' or current_sector=='ticketing' %}<a class="{% if endpoint in ['promoter_lists','promoter_qrs'] %}active{% endif %}" href="{{ url_for('promoter_lists') }}"><span class="nav-symbol">☆</span>Listas RRPP</a>{% endif %}
         {% if g.user['role']=='admin' or current_sector=='beverages' %}<a class="{% if endpoint=='stock' %}active{% endif %}" href="{{ url_for('stock') }}"><span class="nav-symbol">▦</span>Stock</a>{% endif %}
+        {% if g.user['role']=='admin' %}<a href="{{ url_for('settings') }}?section=beverages#bebidas"><span class="nav-symbol">◈</span>Bebidas</a>{% endif %}
         {% if g.user['role']=='admin' %}<a class="{% if endpoint in ['history','session_detail'] %}active{% endif %}" href="{{ url_for('history') }}"><span class="nav-symbol">◷</span>Historial</a>{% endif %}
         <a class="{% if endpoint=='settings' %}active{% endif %}" href="{{ url_for('settings') }}"><span class="nav-symbol">⚙</span>{{ 'Configuración' if g.user['role']=='admin' else 'Mi cuenta' }}</a>
       </nav>
@@ -48,6 +49,17 @@
       </div>
     </div>
   </header>
+
+  {% if g.user['role']=='admin' %}
+  <nav class="admin-quick-tabs" aria-label="Accesos rápidos de administración">
+    <a class="{% if endpoint=='dashboard' %}active{% endif %}" href="{{ url_for('dashboard') }}">Inicio</a>
+    <a class="{% if endpoint in ['promoter_lists','promoter_qrs'] %}active{% endif %}" href="{{ url_for('promoter_lists') }}">Listas RRPP</a>
+    <a class="{% if endpoint=='settings' and request.args.get('section')=='beverages' %}active{% endif %}" href="{{ url_for('settings') }}?section=beverages#bebidas">Bebidas y precios</a>
+    <a class="{% if endpoint=='stock' %}active{% endif %}" href="{{ url_for('stock') }}">Stock</a>
+    <a class="{% if endpoint in ['history','session_detail'] %}active{% endif %}" href="{{ url_for('history') }}">Historial</a>
+    <a class="{% if endpoint=='settings' and request.args.get('section')!='beverages' %}active{% endif %}" href="{{ url_for('settings') }}#usuarios">Usuarios y ajustes</a>
+  </nav>
+  {% endif %}
   {% endif %}
 
   <main class="page-shell {% if not g.user %}auth-shell{% endif %}">

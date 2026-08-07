@@ -67,7 +67,7 @@ DATA_DIR = BASE_DIR / "data"
 BACKUP_DIR = BASE_DIR / "backups"
 DATABASE = DATA_DIR / "floki.db"
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
-APP_VERSION = "2.6.3"
+APP_VERSION = "2.6.4"
 
 PAYMENT_METHODS = {"cash", "mercadopago", "transfer", "debit", "credit", "other"}
 # Las categorías advance/vip se conservan únicamente para leer eventos históricos.
@@ -3073,7 +3073,10 @@ def update_prices():
     except ValueError as exc:
         db.rollback()
         flash(str(exc), "error")
-    return redirect(url_for("settings"))
+    target = url_for("settings")
+    if request.form.get("return_section") == "beverages":
+        target += "#bebidas"
+    return redirect(target)
 
 
 @app.post("/settings/beverages")

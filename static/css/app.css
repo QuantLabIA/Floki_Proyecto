@@ -1249,3 +1249,69 @@ body.app-page .mobile-nav { background: rgba(7,6,10,.97) !important; }
 /* v2.6.3 · recuperación estable */
 body.app-page { min-height: 100vh !important; color: #f8f7fb !important; }
 .page-shell { opacity: 1 !important; visibility: visible !important; }
+
+
+/* v2.6.4 · navegación administrativa restaurada */
+.admin-quick-tabs {
+  position: sticky;
+  top: 76px;
+  z-index: 55;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  overflow-x: auto;
+  padding: 9px max(18px, calc((100vw - 1240px)/2));
+  border-bottom: 1px solid rgba(255,255,255,.08);
+  background: rgba(8,7,12,.985);
+  scrollbar-width: none;
+}
+.admin-quick-tabs::-webkit-scrollbar { display: none; }
+.admin-quick-tabs a {
+  flex: 0 0 auto;
+  min-height: 38px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 14px;
+  border: 1px solid rgba(255,255,255,.09);
+  border-radius: 999px;
+  color: #cfc9d8;
+  background: rgba(255,255,255,.025);
+  font-size: .76rem;
+  font-weight: 780;
+}
+.admin-quick-tabs a:hover,
+.admin-quick-tabs a.active {
+  color: #fff;
+  border-color: rgba(185,76,255,.45);
+  background: rgba(185,76,255,.14);
+}
+.beverage-save-bar {
+  position: sticky;
+  bottom: 12px;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-top: 14px;
+  padding: 12px 14px;
+  border: 1px solid rgba(185,76,255,.30);
+  border-radius: 16px;
+  background: #15111b;
+  box-shadow: 0 14px 32px rgba(0,0,0,.36);
+}
+.beverage-save-bar span { display: grid; gap: 2px; }
+.beverage-save-bar small { color: var(--muted); }
+#bebidas { scroll-margin-top: 150px; }
+#usuarios, #precios { scroll-margin-top: 145px; }
+
+@media (max-width: 860px) {
+  .admin-quick-tabs { top: 64px; padding-left: 12px; padding-right: 12px; }
+  body.role-admin .page-shell { padding-top: 18px; }
+}
+@media (max-width: 680px) {
+  .admin-quick-tabs { top: 64px; }
+  .admin-quick-tabs a { min-height: 36px; padding: 0 12px; font-size: .7rem; }
+  .beverage-save-bar { bottom: calc(72px + env(safe-area-inset-bottom)); align-items: stretch; flex-direction: column; }
+  .beverage-save-bar .primary-button { width: 100%; }
+}
