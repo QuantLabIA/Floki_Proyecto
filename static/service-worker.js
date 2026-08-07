@@ -1,7 +1,6 @@
-const VERSION = 'floki-manager-v2-6-1-hotfix';
+const VERSION = 'floki-manager-v2-6-2-render-safe';
 const STATIC_CACHE = `${VERSION}-static`;
 const CORE = [
-  '/offline-operations',
   '/offline',
   '/static/css/app.css',
   '/static/js/app.js',
@@ -27,7 +26,7 @@ self.addEventListener('activate', (event) => {
 
 const networkFirstNavigation = async (request) => {
   try { return await fetch(request, { cache: 'no-store' }); }
-  catch (_) { return (await caches.match('/offline-operations')) || (await caches.match('/offline')) || Response.error(); }
+  catch (_) { return (await caches.match('/offline')) || Response.error(); }
 };
 
 const networkFirstAsset = async (request) => {

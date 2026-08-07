@@ -71,6 +71,19 @@
   {% endif %}
 
   <script src="{{ url_for('static', filename='js/app.js', v=app_version) }}" defer></script>
-  {% if g.user %}<script src="{{ url_for('static', filename='js/offline-sync.js', v=app_version) }}" defer></script>{% endif %}
+  {% if g.user %}
+  <script>
+    window.addEventListener('load', () => {
+      document.documentElement.classList.add('floki-render-ready');
+      window.setTimeout(() => {
+        const script = document.createElement('script');
+        script.src = "{{ url_for('static', filename='js/offline-sync.js', v=app_version) }}";
+        script.defer = true;
+        script.onerror = () => console.warn('Floki: el módulo offline no pudo cargarse; la operación online sigue disponible.');
+        document.body.appendChild(script);
+      }, 450);
+    }, { once: true });
+  </script>
+  {% endif %}
 </body>
 </html>
