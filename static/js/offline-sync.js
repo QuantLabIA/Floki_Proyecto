@@ -147,6 +147,11 @@
       element.hidden = pending === 0 && conflicts === 0;
       element.classList.toggle('has-conflicts', conflicts > 0);
     });
+    document.querySelectorAll('[data-offline-sync-control]').forEach((element) => {
+      element.hidden = pending === 0 && conflicts === 0;
+      element.classList.toggle('has-conflicts', conflicts > 0);
+      element.title = conflicts > 0 ? `${conflicts} conflicto(s) pendientes de revisión` : `${pending} operación(es) pendientes`;
+    });
     document.documentElement.dataset.offlinePending = String(pending);
     document.documentElement.dataset.offlineConflicts = String(conflicts);
     document.dispatchEvent(new CustomEvent('floki:queue-updated', { detail: { pending, conflicts, operations } }));
@@ -291,7 +296,8 @@
     if (!(form instanceof HTMLFormElement)) return;
     const supported = supportedForm(form);
     if (!supported) return;
-    if (!OFFLINE_STORAGE_AVAILABLE && navigator.onLine) return;
+    // Etapa 1 segura: con internet NO interceptamos nada; Flask maneja el formulario como siempre.
+    if (navigator.onLine) return;
     event.preventDefault();
     event.stopImmediatePropagation();
     if (form.dataset.confirm && !window.confirm(form.dataset.confirm)) return;

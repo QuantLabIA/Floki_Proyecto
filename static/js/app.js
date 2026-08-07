@@ -61,18 +61,29 @@ document.querySelectorAll('[data-quick-category]').forEach((button) => {
 updateSaleFields();
 
 setTimeout(() => document.querySelectorAll('.flash').forEach((element) => element.remove()), 4500);
-// v2.6.3: recuperación estable. Retiramos temporalmente el Service Worker de Offline First.
-// Esto elimina controladores/cachés antiguos que podían interceptar el dashboard después del login.
+// v2.7: Service Worker seguro. No intercepta ni cachea HTML/dashboards.
+// Se registra solamente para mantener la instalación PWA y retirar cachés viejos.
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', async () => {
     try {
-      const registrations = await navigator.serviceWorker.getRegistrations();
-      await Promise.all(registrations.map((registration) => registration.unregister()));
-      if ('caches' in window) {
-        const keys = await caches.keys();
-        await Promise.all(keys.filter((key) => key.startsWith('floki-manager-')).map((key) => caches.delete(key)));
-      }
-    } catch (_) { /* La app online no depende del Service Worker. */ }
+      await navigator.serviceWorker.register('/service-worker.js', { scope: '/', updateViaCache: 'none' });
+    } catch (_) { /* La app online funciona aunque el navegador no permita Service Worker. */ }
+  }, { once: true });
+}
+
+// Offline Seguro Etapa 1: se carga DESPUÉS de que la interfaz ya renderizó.
+// Si este módulo falla, nunca debe impedir el uso normal online.
+if (document.documentElement.dataset.flokiAuthenticated === '1') {
+  window.addEventListener('load', () => {
+    window.setTimeout(() => {
+      if (document.querySelector('script[data-floki-offline-safe]')) return;
+      const script = document.createElement('script');
+      script.src = `/static/js/offline-sync.js?v=${encodeURIComponent(document.querySelector('.brand-copy small')?.textContent || '2.7.0')}`;
+      script.defer = true;
+      script.dataset.flokiOfflineSafe = '1';
+      script.onerror = () => console.warn('Floki Offline Seguro no pudo cargarse; la aplicación continúa online.');
+      document.body.appendChild(script);
+    }, 900);
   }, { once: true });
 }
 

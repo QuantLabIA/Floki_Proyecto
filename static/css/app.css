@@ -1315,3 +1315,18 @@ body.app-page { min-height: 100vh !important; color: #f8f7fb !important; }
   .beverage-save-bar { bottom: calc(72px + env(safe-area-inset-bottom)); align-items: stretch; flex-direction: column; }
   .beverage-save-bar .primary-button { width: 100%; }
 }
+
+/* v2.7 · Offline Seguro Etapa 1 */
+.offline-pending-control {
+  border: 1px solid rgba(185,76,255,.38);
+  background: rgba(32,19,43,.92);
+  color: #f7f4fa;
+  min-height: 34px;
+  padding: 6px 11px;
+  border-radius: 999px;
+  font: inherit;
+  font-size: .78rem;
+  cursor: pointer;
+}
+.offline-pending-control strong { color: #d78cff; }
+.offline-pending-control.has-conflicts { border-color: rgba(255,92,114,.55); }

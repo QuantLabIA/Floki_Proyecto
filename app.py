@@ -67,7 +67,7 @@ DATA_DIR = BASE_DIR / "data"
 BACKUP_DIR = BASE_DIR / "backups"
 DATABASE = DATA_DIR / "floki.db"
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
-APP_VERSION = "2.6.4"
+APP_VERSION = "2.7.0"
 
 PAYMENT_METHODS = {"cash", "mercadopago", "transfer", "debit", "credit", "other"}
 # Las categorías advance/vip se conservan únicamente para leer eventos históricos.
@@ -3443,7 +3443,8 @@ def diagnostic():
         "database": "postgresql" if db.is_postgres else "sqlite",
         "user": {"id": g.user["id"], "username": g.user["username"], "role": g.user["role"], "sector": g.user["sector"]},
         "checks": checks,
-        "offline_temporarily_disabled": True,
+        "offline_safe_stage": 1,
+        "offline_temporarily_disabled": False,
     }), (200 if ok else 500)
 
 

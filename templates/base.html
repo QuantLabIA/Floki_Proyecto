@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="es">
+<html lang="es"{% if g.user %} data-floki-authenticated="1" data-floki-user-id="{{ g.user['id'] }}" data-floki-csrf="{{ csrf_token }}"{% endif %}>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -22,6 +22,7 @@
   <div class="pwa-controls" aria-live="polite">
     <span class="network-status online" data-network-status><i></i><span>En línea</span></span>
     <button type="button" class="install-app-button" data-install-app hidden>Instalar app</button>
+    {% if g.user %}<button type="button" class="offline-pending-control" data-offline-sync-control data-sync-now hidden><strong data-offline-pending>0</strong> pendientes</button>{% endif %}
   </div>
 
   {% if g.user %}
