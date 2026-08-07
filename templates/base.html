@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="es" data-floki-csrf="{{ csrf_token or '' }}" data-floki-user-id="{{ g.user['id'] if g.user else '' }}">
+<html lang="es">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -21,8 +21,6 @@
 
   <div class="pwa-controls" aria-live="polite">
     <span class="network-status online" data-network-status><i></i><span>En línea</span></span>
-    {% if g.user %}<a href="{{ url_for('offline_operations_page') }}" class="offline-queue-button" data-offline-queue-link hidden><strong data-offline-pending>0</strong> pendientes <span class="offline-conflict-count">· <b data-offline-conflicts>0</b> conflictos</span></a>
-    <button type="button" class="sync-app-button" data-sync-now>Sincronizar</button>{% endif %}
     <button type="button" class="install-app-button" data-install-app hidden>Instalar app</button>
   </div>
 
@@ -71,19 +69,5 @@
   {% endif %}
 
   <script src="{{ url_for('static', filename='js/app.js', v=app_version) }}" defer></script>
-  {% if g.user %}
-  <script>
-    window.addEventListener('load', () => {
-      document.documentElement.classList.add('floki-render-ready');
-      window.setTimeout(() => {
-        const script = document.createElement('script');
-        script.src = "{{ url_for('static', filename='js/offline-sync.js', v=app_version) }}";
-        script.defer = true;
-        script.onerror = () => console.warn('Floki: el módulo offline no pudo cargarse; la operación online sigue disponible.');
-        document.body.appendChild(script);
-      }, 450);
-    }, { once: true });
-  </script>
-  {% endif %}
 </body>
 </html>

@@ -67,7 +67,7 @@ DATA_DIR = BASE_DIR / "data"
 BACKUP_DIR = BASE_DIR / "backups"
 DATABASE = DATA_DIR / "floki.db"
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
-APP_VERSION = "2.6.2"
+APP_VERSION = "2.6.3"
 
 PAYMENT_METHODS = {"cash", "mercadopago", "transfer", "debit", "credit", "other"}
 # Las categorías advance/vip se conservan únicamente para leer eventos históricos.
@@ -173,6 +173,7 @@ def close_db(_error=None):
 @app.after_request
 def add_security_headers(response):
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers["X-Floki-Version"] = APP_VERSION
     response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
     response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
     response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
@@ -3412,6 +3413,37 @@ def api_status():
     return jsonify(payload)
 
 
+@app.route("/diagnostic")
+@login_required
+def diagnostic():
+    """Diagnóstico mínimo que no depende del dashboard ni del JavaScript/PWA."""
+    db = get_db()
+    checks = {}
+    probes = {
+        "user": ("SELECT id, name, username, role, sector, active FROM users WHERE id=?", (g.user["id"],)),
+        "open_cash": ("SELECT id, event_name, event_date, status FROM cash_sessions WHERE status='open' ORDER BY id DESC LIMIT 1", ()),
+        "promoters": ("SELECT COUNT(*) AS total FROM promoters WHERE active=1", ()),
+        "beverages": ("SELECT COUNT(*) AS total FROM beverage_products WHERE active=1", ()),
+        "ticketing_products": ("SELECT COUNT(*) AS total FROM ticketing_products WHERE active=1", ()),
+    }
+    ok = True
+    for name, (sql, params) in probes.items():
+        try:
+            row = db.execute(sql, params).fetchone()
+            checks[name] = dict(row) if row is not None else None
+        except Exception as exc:
+            ok = False
+            checks[name] = {"error": type(exc).__name__, "message": str(exc)[:240]}
+    return jsonify({
+        "status": "ok" if ok else "error",
+        "version": APP_VERSION,
+        "database": "postgresql" if db.is_postgres else "sqlite",
+        "user": {"id": g.user["id"], "username": g.user["username"], "role": g.user["role"], "sector": g.user["sector"]},
+        "checks": checks,
+        "offline_temporarily_disabled": True,
+    }), (200 if ok else 500)
+
+
 @app.route("/health")
 def health():
     try:
@@ -3443,6 +3475,14 @@ def service_worker():
 @app.route("/offline")
 def offline():
     return render_template("offline.html")
+
+
+@app.errorhandler(500)
+def internal_error(error):
+    app.logger.exception("Unhandled Floki request error", exc_info=getattr(error, "original_exception", error))
+    # Respuesta deliberadamente independiente de base.html/CSS/JS para que un error real nunca se vea como pantalla blanca.
+    html = f"""<!doctype html><html lang='es'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Floki · Error</title></head><body style='margin:0;padding:32px;background:#09070d;color:#fff;font-family:system-ui,sans-serif'><main style='max-width:720px;margin:auto'><h1 style='color:#c66cff'>Floki Manager</h1><h2>No se pudo cargar esta pantalla</h2><p>La aplicación está en línea, pero ocurrió un error interno. Versión {APP_VERSION}.</p><p>Probá <a style='color:#d9a0ff' href='/diagnostic'>/diagnostic</a> con tu sesión iniciada para identificar qué consulta falló.</p></main></body></html>"""
+    return Response(html, status=500, mimetype="text/html")
 
 
 @app.errorhandler(403)

@@ -61,13 +61,19 @@ document.querySelectorAll('[data-quick-category]').forEach((button) => {
 updateSaleFields();
 
 setTimeout(() => document.querySelectorAll('.flash').forEach((element) => element.remove()), 4500);
+// v2.6.3: recuperación estable. Retiramos temporalmente el Service Worker de Offline First.
+// Esto elimina controladores/cachés antiguos que podían interceptar el dashboard después del login.
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', async () => {
     try {
-      const registration = await navigator.serviceWorker.register('/service-worker.js', { updateViaCache: 'none' });
-      await registration.update();
-    } catch (_) { /* La web normal sigue disponible aunque falle la instalación PWA. */ }
-  });
+      const registrations = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(registrations.map((registration) => registration.unregister()));
+      if ('caches' in window) {
+        const keys = await caches.keys();
+        await Promise.all(keys.filter((key) => key.startsWith('floki-manager-')).map((key) => caches.delete(key)));
+      }
+    } catch (_) { /* La app online no depende del Service Worker. */ }
+  }, { once: true });
 }
 
 // Floki Manager v1.2: sincroniza los controles globales con todos los botones rápidos.

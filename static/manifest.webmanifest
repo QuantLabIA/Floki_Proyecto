@@ -2,7 +2,7 @@
   "id": "/",
   "name": "Floki Manager",
   "short_name": "Floki",
-  "description": "Administración de caja, accesos, listas y stock de Floki Club con cola offline",
+  "description": "Administración de caja, accesos, listas y stock de Floki Club",
   "lang": "es-AR",
   "start_url": "/?source=pwa",
   "scope": "/",
@@ -61,17 +61,6 @@
       "name": "Stock",
       "short_name": "Stock",
       "url": "/stock",
-      "icons": [
-        {
-          "src": "/static/icons/icon-192.png",
-          "sizes": "192x192"
-        }
-      ]
-    },
-    {
-      "name": "Operaciones sin conexión",
-      "short_name": "Offline",
-      "url": "/offline-operations",
       "icons": [
         {
           "src": "/static/icons/icon-192.png",

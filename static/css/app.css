@@ -1208,4 +1208,44 @@ select { color-scheme: dark; }
     -webkit-backdrop-filter: none !important;
   }
 }
-\n\n/* v2.6.2 · Modo de renderizado estable para navegadores/GPU antiguos.\n   Mantiene la identidad negro/violeta, pero evita capas de composición que\n   pueden producir una pantalla blanca después del login. */\nhtml, body { background-color: #050508 !important; }\nbody.app-page {\n  opacity: 1 !important;\n  visibility: visible !important;\n  background: linear-gradient(180deg, #08070b 0%, #050508 58%, #07060a 100%) !important;\n}\nbody.app-page::before {\n  opacity: .035 !important;\n  mask-image: none !important;\n  -webkit-mask-image: none !important;\n}\nbody.app-page .ambient { display: none !important; filter: none !important; }\nbody.app-page .topbar,\nbody.app-page .card,\nbody.app-page .metric-card,\nbody.app-page .action-card,\nbody.app-page .modal-card,\nbody.app-page .mobile-nav,\nbody.app-page .pwa-controls {\n  backdrop-filter: none !important;\n  -webkit-backdrop-filter: none !important;\n}\nbody.app-page .topbar { background: rgba(7, 6, 10, .97) !important; }\nbody.app-page .card,\nbody.app-page .metric-card,\nbody.app-page .action-card,\nbody.app-page .modal-card {\n  background: linear-gradient(145deg, rgba(28,24,36,.98), rgba(12,11,16,.98)) !important;\n  box-shadow: 0 14px 38px rgba(0,0,0,.32) !important;\n}\nbody.app-page .pwa-controls,\nbody.app-page .mobile-nav { background: rgba(7,6,10,.97) !important; }\n
+
+
+/* v2.6.2 · Modo de renderizado estable para navegadores/GPU antiguos.
+   Mantiene la identidad negro/violeta, pero evita capas de composición que
+   pueden producir una pantalla blanca después del login. */
+html, body { background-color: #050508 !important; }
+body.app-page {
+  opacity: 1 !important;
+  visibility: visible !important;
+  background: linear-gradient(180deg, #08070b 0%, #050508 58%, #07060a 100%) !important;
+}
+body.app-page::before {
+  opacity: .035 !important;
+  mask-image: none !important;
+  -webkit-mask-image: none !important;
+}
+body.app-page .ambient { display: none !important; filter: none !important; }
+body.app-page .topbar,
+body.app-page .card,
+body.app-page .metric-card,
+body.app-page .action-card,
+body.app-page .modal-card,
+body.app-page .mobile-nav,
+body.app-page .pwa-controls {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+body.app-page .topbar { background: rgba(7, 6, 10, .97) !important; }
+body.app-page .card,
+body.app-page .metric-card,
+body.app-page .action-card,
+body.app-page .modal-card {
+  background: linear-gradient(145deg, rgba(28,24,36,.98), rgba(12,11,16,.98)) !important;
+  box-shadow: 0 14px 38px rgba(0,0,0,.32) !important;
+}
+body.app-page .pwa-controls,
+body.app-page .mobile-nav { background: rgba(7,6,10,.97) !important; }
+
+/* v2.6.3 · recuperación estable */
+body.app-page { min-height: 100vh !important; color: #f8f7fb !important; }
+.page-shell { opacity: 1 !important; visibility: visible !important; }
