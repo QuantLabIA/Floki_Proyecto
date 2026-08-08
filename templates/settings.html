@@ -62,7 +62,7 @@
       <label>Cómo se cuenta el stock<select name="stock_unit" required>{% for option in beverage_stock_unit_options %}<option value="{{ option }}">{{ option|title }}</option>{% endfor %}</select></label>
       <label>Precio<select name="price">{% for price in beverage_price_options if price > 0 %}<option value="{{ price }}">{{ price|money }}</option>{% endfor %}</select><small>Podés usar $4.500, $5.500, etc.</small></label>
       <div class="automatic-yield-note"><strong>Rendimiento automático</strong><small>Floki lo calcula según la categoría, la presentación vendida y cómo contás el stock. No tenés que cargarlo manualmente.</small></div>
-      <label>Orden<input type="number" name="sort_order" min="0" max="10000" value="100"></label>
+      <div class="automatic-yield-note"><strong>Orden automático</strong><small>La bebida se acomoda sola dentro de su categoría por nombre. No tenés que elegir una posición.</small></div>
       <button class="secondary-button" type="submit">Agregar variante</button>
     </form>
   </article>

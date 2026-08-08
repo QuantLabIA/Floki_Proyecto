@@ -1,77 +1,27 @@
-# Floki Manager v2.8 · Stock y dashboard simplificado
+# Floki Manager v2.8.4 · Cierre efectivo + Mercado Pago
 
-Esta versión parte de la base estable v2.7 y simplifica el trabajo diario: agrega una planilla oficial de stock descargable/reimportable, un conteo más claro, rendimiento aproximado configurable por bebida y un dashboard administrativo más directo.
+Versión operativa estable para Railway/PostgreSQL. Mantiene el modo **online estable sin Offline First** para evitar la pantalla blanca que apareció al introducir la capa offline.
 
-> El modo Offline Seguro Etapa 1 se conserva: no cachea páginas ni dashboards y solo prepara operaciones locales después de que la interfaz ya cargó.
+## Cambios principales
 
+- Caja de Bebidas registra todas las ventas pagas como **efectivo operativo**, sin pedir medio de pago en cada consumición.
+- Al cerrar la noche, Administración declara por separado **Plata en efectivo** y **Mercado Pago**. Floki suma ambos y compara el total contra la recaudación teórica.
+- `Bebida especial`, `Venta especial` y `Registrar gasto` fueron retirados del dashboard para simplificar la operación. Las rutas históricas se mantienen por compatibilidad.
+- El campo manual **Orden** al crear bebidas fue eliminado. Las variantes se agrupan por categoría y se ordenan automáticamente por nombre.
+- Se mantienen categorías CERVEZAS, FERNET, VODKA, WHISKY, TRAGOS, GASEOSAS, SHOTS y CHAMPAGNE.
+- Todo Champagne sigue incluyendo automáticamente **2 Speed por unidad**.
+- Se conserva stock automático, conteo final y rendimiento real del evento.
 
-Esta versión mantiene PostgreSQL, Railway, la PWA instalable y los banners dinámicos de eventos, y agrega una **cola local de operaciones** para continuar trabajando durante cortes temporales de internet.
+## Lógica del cierre
 
-## Qué funciona sin conexión
+Durante la noche no hace falta marcar qué bebida se pagó por Mercado Pago. Al finalizar:
 
-Después de abrir el evento y entrar al sistema al menos una vez con internet, el dispositivo guarda localmente el evento, los precios y el catálogo autorizado para ese usuario.
+1. contás el dinero físico y lo cargás en **Plata en efectivo**;
+2. cargás lo recibido por **Mercado Pago**;
+3. Floki calcula `total declarado = efectivo + Mercado Pago`;
+4. compara ese total con `monto inicial + ventas - gastos` y muestra la diferencia.
 
-Pueden registrarse sin conexión:
-
-- entrada general;
-- guardarropa;
-- venta normal de bebidas;
-- bebida especial con comentario;
-- BENEFICIO RRPP;
-- 50% OFF de cumpleaños, sujeto a validación al sincronizar;
-- confirmación de personas cargadas en listas RRPP, PROMOS, cumpleaños o Lista común.
-
-Cada operación recibe un identificador único. Cuando vuelve internet, se envía a PostgreSQL y el servidor evita que se registre dos veces aunque el dispositivo reintente.
-
-## Qué continúa requiriendo internet
-
-Por seguridad y para evitar conflictos entre celulares:
-
-- crear, eliminar o cerrar eventos;
-- modificar usuarios y permisos;
-- cambiar precios o catálogo;
-- importar listas o stock;
-- modificar el conteo de stock;
-- anular movimientos;
-- entregar el regalo físico de cumpleaños;
-- exportar PDF o Excel.
-
-## Preparar un dispositivo para trabajar offline
-
-1. Abrí Floki Manager con internet.
-2. Iniciá sesión con el usuario que realmente utilizará ese teléfono o computadora.
-3. Abrí el evento y esperá unos segundos en el dashboard.
-4. Confirmá que aparezca `En línea`.
-5. Desde ese momento, el evento, precios, bebidas y listas disponibles quedan preparados en ese dispositivo.
-
-Las colas pertenecen al usuario y al evento que estaban activos al momento de guardar la operación. Para sincronizarlas hay que volver a iniciar sesión con ese mismo usuario.
-
-## Indicadores
-
-La barra superior muestra:
-
-- `En línea` o `Sin conexión`;
-- cantidad de operaciones pendientes;
-- cantidad de conflictos;
-- botón `Sincronizar`.
-
-La pantalla `/offline-operations` permite trabajar con el último evento guardado, revisar conflictos y borrar los datos locales del dispositivo.
-
-## Conflictos posibles
-
-Una operación queda en conflicto cuando, por ejemplo:
-
-- otra caja ya confirmó el mismo nombre;
-- el evento fue cerrado antes de sincronizar;
-- se modificó o desactivó una bebida;
-- el horario del beneficio ya había vencido;
-- se intenta sincronizar con otro usuario.
-
-Los conflictos no se suman a la caja. Quedan visibles en el dispositivo para poder revisarlos o descartarlos.
-
-## Advertencia para el cierre
-
-El administrador no debería cerrar la caja hasta que todos los dispositivos muestren `0 pendientes`. La web bloquea el cierre cuando **ese dispositivo** tiene operaciones locales pendientes, pero un servidor no puede conocer la cola de un celular que continúa completamente desconectado.
+Los medios de pago de boletería pueden seguir registrándose individualmente. En bebidas, el campo se fija deliberadamente en efectivo para priorizar velocidad.
 
 ## Instalación local
 

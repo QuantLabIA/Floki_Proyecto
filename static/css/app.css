@@ -1407,3 +1407,8 @@ body.app-page { min-height: 100vh !important; color: #f8f7fb !important; }
   .beverage-sale-category-title { position:sticky; top:64px; z-index:2; backdrop-filter:none; }
   .automatic-yield-pill { grid-column:1 / -1; }
 }
+
+/* v2.8.4 · Caja de bebidas rápida */
+.quick-controls.single-control { grid-template-columns: minmax(0, 320px); }
+.beverage-cash-note { margin: -12px 0 20px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: rgba(126, 64, 255, .06); }
+@media (max-width: 760px) { .quick-controls.single-control { grid-template-columns: 1fr; } }

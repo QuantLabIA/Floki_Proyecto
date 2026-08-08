@@ -18,21 +18,23 @@
 
 <section class="report-grid">
   <article class="card">
-    <div class="section-heading"><div><p class="eyebrow">CIERRE</p><h2>Control de efectivo</h2></div></div>
+    <div class="section-heading"><div><p class="eyebrow">CIERRE</p><h2>Dinero declarado</h2></div></div>
     <div class="summary-lines">
       <div><span>Monto inicial</span><strong>{{ cash['opening_amount']|money }}</strong></div>
-      <div><span>Ventas en efectivo</span><strong>{{ totals['cash_sales']|money }}</strong></div>
-      <div><span>Gastos en efectivo</span><strong>−{{ totals['cash_expenses']|money }}</strong></div>
-      <div><span>Efectivo esperado</span><strong>{{ expected_cash|money }}</strong></div>
+      <div><span>Ventas totales</span><strong>{{ totals['sales']|money }}</strong></div>
+      <div><span>Gastos</span><strong>−{{ totals['expenses']|money }}</strong></div>
+      <div><span>Total esperado</span><strong>{{ expected_total|money }}</strong></div>
       {% if cash['status']=='closed' %}
-      <div><span>Efectivo declarado</span><strong>{{ cash['declared_cash']|money }}</strong></div>
+      <div><span>Plata en efectivo</span><strong>{{ (cash['declared_cash'] or 0)|money }}</strong></div>
+      <div><span>Mercado Pago declarado</span><strong>{{ (cash['declared_mercadopago'] or 0)|money }}</strong></div>
+      <div><span>Total declarado</span><strong>{{ ((cash['declared_total'] if cash['declared_total'] is not none else (cash['declared_cash'] or 0)))|money }}</strong></div>
       <div><span>Diferencia</span><strong class="{% if cash['difference'] < 0 %}text-red{% elif cash['difference'] > 0 %}text-green{% endif %}">{{ cash['difference']|money }}</strong></div>
       {% endif %}
     </div>
   </article>
 
   <article class="card">
-    <div class="section-heading"><div><p class="eyebrow">MEDIOS DE PAGO</p><h2>Ventas y gastos</h2></div></div>
+    <div class="section-heading"><div><p class="eyebrow">MEDIOS REGISTRADOS</p><h2>Referencia operativa</h2><p class="muted compact-copy">Las bebidas se registran como efectivo para agilizar la barra. El Mercado Pago real es el declarado al cierre.</p></div></div>
     <div class="payment-list">
       {% for row in by_payment %}<div><span>{{ payment_labels[row['payment_method']] }}</span><strong>{{ row['net']|money }}</strong></div>{% else %}<p class="muted">Sin movimientos.</p>{% endfor %}
     </div>

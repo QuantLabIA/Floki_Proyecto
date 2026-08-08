@@ -225,6 +225,10 @@ Nicolás Becerra
         status = self.client.get("/api/status").get_json()
         self.assertEqual(status["sales"], 28000)
         self.assertEqual(status["people_count"], 2)
+        connection = sqlite3.connect(self.db_path)
+        beverage_payment = connection.execute("SELECT payment_method FROM movements WHERE category='drink' ORDER BY id DESC LIMIT 1").fetchone()[0]
+        connection.close()
+        self.assertEqual(beverage_payment, "cash")
 
     def test_cloakroom_stock_and_list_cleanup_on_close(self):
         token = self.login()
@@ -291,6 +295,7 @@ Nicolás Becerra
         self.assertIn('Promo vaso de fernet', special['description'])
         self.assertEqual(special['total'], 15000)
         self.assertEqual(special['quantity'], 3)
+        self.assertEqual(special['payment_method'], 'cash')
         connection.close()
 
         response = self.client.post('/stock/update', data={
@@ -320,6 +325,47 @@ Nicolás Becerra
         export = self.client.get('/stock/export.xlsx')
         with zipfile.ZipFile(io.BytesIO(export.data)) as archive:
             self.assertNotIn(b'Gin Bombay Sapphire', archive.read('xl/worksheets/sheet1.xml'))
+
+    def test_dashboard_removes_manual_special_cards_and_beverage_order_field(self):
+        token = self.login()
+        self.open_cash(token)
+        page = self.client.get('/')
+        self.assertNotIn(b'>Bebida especial<', page.data)
+        self.assertNotIn(b'>Venta especial<', page.data)
+        self.assertNotIn(b'>Registrar gasto<', page.data)
+        settings = self.client.get('/settings')
+        self.assertNotIn(b'name="sort_order"', settings.data)
+        self.assertIn('Orden automático'.encode('utf-8'), settings.data)
+
+    def test_close_declares_cash_and_mercadopago_as_one_total(self):
+        token = self.login()
+        self.open_cash(token)
+        connection = sqlite3.connect(self.db_path)
+        beverage_id = connection.execute("SELECT id FROM beverage_products WHERE beverage_type='Cerveza' ORDER BY id LIMIT 1").fetchone()[0]
+        price = connection.execute("SELECT price FROM beverage_products WHERE id=?", (beverage_id,)).fetchone()[0]
+        session_id = connection.execute("SELECT id FROM cash_sessions WHERE status='open'").fetchone()[0]
+        connection.close()
+        self.client.post('/movements/quick-sale', data={
+            'sale_kind':'beverage','beverage_id':beverage_id,'quantity':'2',
+            'payment_method':'mercadopago','csrf_token':token
+        }, follow_redirects=True)
+        expected_total = 10000 + price * 2
+        response = self.client.post('/cash/close', data={
+            'declared_cash': str(expected_total - 5000),
+            'declared_mercadopago':'5000',
+            'notes':'cierre prueba','csrf_token':token
+        }, follow_redirects=True)
+        self.assertEqual(response.status_code, 200)
+        connection = sqlite3.connect(self.db_path)
+        row = connection.execute(
+            'SELECT declared_cash,declared_mercadopago,declared_total,expected_total,difference FROM cash_sessions WHERE id=?',
+            (session_id,),
+        ).fetchone()
+        connection.close()
+        self.assertEqual(row[1], 5000)
+        self.assertEqual(row[2], expected_total)
+        self.assertEqual(row[3], expected_total)
+        self.assertEqual(row[4], 0)
 
     def test_free_is_only_created_from_loaded_lists(self):
         token = self.login()

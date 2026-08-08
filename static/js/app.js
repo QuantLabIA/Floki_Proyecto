@@ -61,7 +61,7 @@ document.querySelectorAll('[data-quick-category]').forEach((button) => {
 updateSaleFields();
 
 setTimeout(() => document.querySelectorAll('.flash').forEach((element) => element.remove()), 4500);
-// v2.8.3: modo estable online. Offline First queda retirado de la versión operativa.
+// v2.8.4: modo estable online. Bebidas se registran operativamente como efectivo; MP se declara al cierre.
 // Desregistramos cualquier Service Worker anterior y limpiamos sólo cachés de Floki.
 // NO borramos IndexedDB para no perder posibles operaciones pendientes de pruebas anteriores.
 if ('serviceWorker' in navigator) {

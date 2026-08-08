@@ -67,7 +67,7 @@ DATA_DIR = BASE_DIR / "data"
 BACKUP_DIR = BASE_DIR / "backups"
 DATABASE = DATA_DIR / "floki.db"
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
-APP_VERSION = "2.8.3"
+APP_VERSION = "2.8.4"
 
 PAYMENT_METHODS = {"cash", "mercadopago", "transfer", "debit", "credit", "other"}
 # Las categorías advance/vip se conservan únicamente para leer eventos históricos.
@@ -344,10 +344,13 @@ def infer_beverage_category(beverage_type=None, brand=None, sale_unit=None, name
 
 
 def group_beverages(rows):
+    """Agrupa por categoría fija y ordena automáticamente cada grupo por nombre."""
     grouped = {label: [] for label in BEVERAGE_CATEGORY_OPTIONS}
     for row in rows:
         label = infer_beverage_category(row["beverage_type"], row["brand"], row["sale_unit"], row["name"])
         grouped[label].append(row)
+    for label in grouped:
+        grouped[label].sort(key=lambda row: str(row["name"] or "").casefold())
     return [{"label": label, "items": grouped[label]} for label in BEVERAGE_CATEGORY_OPTIONS if grouped[label]]
 
 
@@ -709,7 +712,10 @@ def init_db():
                 closed_at TEXT,
                 closed_by INTEGER,
                 declared_cash REAL,
+                declared_mercadopago REAL,
+                declared_total REAL,
                 expected_cash REAL,
+                expected_total REAL,
                 difference REAL,
                 notes TEXT,
                 event_name TEXT NOT NULL DEFAULT 'Noche Floki',
@@ -932,6 +938,9 @@ def init_db():
         add_column_if_missing(db, "cash_sessions", "event_image_data", "BYTEA")
         add_column_if_missing(db, "cash_sessions", "event_image_mime", "TEXT")
         add_column_if_missing(db, "cash_sessions", "event_image_name", "TEXT")
+        add_column_if_missing(db, "cash_sessions", "declared_mercadopago", "REAL")
+        add_column_if_missing(db, "cash_sessions", "declared_total", "REAL")
+        add_column_if_missing(db, "cash_sessions", "expected_total", "REAL")
         add_column_if_missing(db, "users", "sector", "TEXT NOT NULL DEFAULT 'ticketing'")
         add_column_if_missing(db, "movements", "promoter_id", "INTEGER")
         add_column_if_missing(db, "movements", "sector", "TEXT NOT NULL DEFAULT 'ticketing'")
@@ -1277,7 +1286,7 @@ def ensure_beverage_in_event_stock(db, cash_session_id, product, user_id):
 
 
 def initialize_event_stock(db, cash_session_id, user_id):
-    products = db.execute("SELECT * FROM beverage_products WHERE active=1 ORDER BY sort_order, name COLLATE NOCASE").fetchall()
+    products = db.execute("SELECT * FROM beverage_products WHERE active=1 ORDER BY name COLLATE NOCASE").fetchall()
     for product in products:
         ensure_beverage_in_event_stock(db, cash_session_id, product, user_id)
 
@@ -1429,7 +1438,7 @@ def dashboard():
     show_beverages = g.user["role"] == "admin" or sector == "beverages"
     active_promoters = get_db().execute("SELECT * FROM promoters WHERE active=1 AND is_common=0 AND is_promo=0 ORDER BY name COLLATE NOCASE").fetchall() if show_entries else []
     entry_prices = active_entry_prices() if show_entries else []
-    beverages = get_db().execute("SELECT * FROM beverage_products WHERE active=1 ORDER BY sort_order, name COLLATE NOCASE").fetchall() if show_beverages else []
+    beverages = get_db().execute("SELECT * FROM beverage_products WHERE active=1 ORDER BY name COLLATE NOCASE").fetchall() if show_beverages else []
     beverage_groups = group_beverages(beverages) if show_beverages else []
     ticketing_products = get_db().execute("SELECT * FROM ticketing_products WHERE active=1 ORDER BY sort_order, name COLLATE NOCASE").fetchall() if show_entries else []
     birthday_promoters = []
@@ -1437,7 +1446,7 @@ def dashboard():
         birthday_promoters = birthday_promoter_statuses(get_db(), cash["id"])
     if cash:
         totals, all_by_payment = session_totals(cash["id"])
-        expected_cash = cash["opening_amount"] + totals["cash_sales"] - totals["cash_expenses"] if g.user["role"] == "admin" else None
+        expected_total = cash["opening_amount"] + totals["sales"] - totals["expenses"] if g.user["role"] == "admin" else None
         all_movements = session_movements(cash["id"], limit=60)
         if g.user["role"] == "admin":
             movements = all_movements[:20]
@@ -1469,10 +1478,10 @@ def dashboard():
     else:
         totals = by_payment = movements = promoter_summary = None
         beverage_progress = []
-        expected_cash = occupancy_percent = guest_pending = stock_pending = 0
+        expected_total = occupancy_percent = guest_pending = stock_pending = 0
     return render_template(
         "dashboard.html", cash=cash, totals=totals, by_payment=by_payment, movements=movements,
-        expected_cash=expected_cash, promoters=active_promoters, entry_prices=entry_prices, beverages=beverages, beverage_groups=beverage_groups,
+        expected_total=expected_total, promoters=active_promoters, entry_prices=entry_prices, beverages=beverages, beverage_groups=beverage_groups,
         promoter_summary=promoter_summary, occupancy_percent=occupancy_percent, guest_pending=guest_pending,
         show_entries=show_entries, show_beverages=show_beverages, ticketing_products=ticketing_products, sector=sector, today=date.today().isoformat(), stock_pending=stock_pending,
         beverage_progress=beverage_progress, birthday_promoters=birthday_promoters,
@@ -1650,7 +1659,13 @@ def perform_quick_sale(db, cash, user, payload, *, created_at=None):
             raise PermissionError("Tu usuario no tiene acceso a esa operación")
 
     quantity = positive_int(payload.get("quantity", "1"), "La cantidad", maximum=100)
-    payment_method = str(payload.get("payment_method", "cash"))
+    # Para agilizar Caja de Bebidas, toda venta paga de bebidas se registra
+    # operativamente como efectivo. El Mercado Pago real se declara una sola
+    # vez al cierre de la noche y no en cada consumición.
+    if sale_kind in {"beverage", "special_beverage", "birthday_discount"}:
+        payment_method = "cash"
+    else:
+        payment_method = str(payload.get("payment_method", "cash"))
     if payment_method not in PAYMENT_METHODS:
         raise ValueError("Medio de pago inválido")
 
@@ -1852,21 +1867,27 @@ def close_cash():
         return redirect(url_for("dashboard"))
     try:
         declared_cash = money_to_float(request.form.get("declared_cash"))
+        declared_mercadopago = money_to_float(request.form.get("declared_mercadopago", "0"))
     except ValueError as exc:
         flash(str(exc), "error")
         return redirect(url_for("dashboard"))
     totals, _ = session_totals(cash["id"])
+    # expected_cash se conserva para compatibilidad histórica; el control real
+    # de esta versión compara el total teórico con efectivo + Mercado Pago declarados.
     expected_cash = round(cash["opening_amount"] + totals["cash_sales"] - totals["cash_expenses"], 2)
-    difference = round(declared_cash - expected_cash, 2)
+    expected_total = round(cash["opening_amount"] + totals["sales"] - totals["expenses"], 2)
+    declared_total = round(declared_cash + declared_mercadopago, 2)
+    difference = round(declared_total - expected_total, 2)
     notes = request.form.get("notes", "").strip()[:500]
     db = get_db()
     db.execute(
         """
         UPDATE cash_sessions
-        SET status='closed', closed_at=?, closed_by=?, declared_cash=?, expected_cash=?, difference=?, notes=?
+        SET status='closed', closed_at=?, closed_by=?, declared_cash=?, declared_mercadopago=?, declared_total=?,
+            expected_cash=?, expected_total=?, difference=?, notes=?
         WHERE id=?
         """,
-        (now_iso(), g.user["id"], declared_cash, expected_cash, difference, notes, cash["id"]),
+        (now_iso(), g.user["id"], declared_cash, declared_mercadopago, declared_total, expected_cash, expected_total, difference, notes, cash["id"]),
     )
     renewed_qrs = rotate_promoter_qr_tokens(db)
     removed_guests, removed_checkins = clear_event_promoter_lists(db, cash["id"])
@@ -3057,7 +3078,14 @@ def session_detail(session_id):
     payment_method = request.args.get("payment", "")
     totals, by_payment = session_totals(session_id)
     movements = session_movements(session_id, movement_type=movement_type, payment_method=payment_method)
-    expected_cash = cash["opening_amount"] + totals["cash_sales"] - totals["cash_expenses"]
+    calculated_total = cash["opening_amount"] + totals["sales"] - totals["expenses"]
+    if cash["status"] == "closed" and cash["expected_total"] is not None:
+        expected_total = float(cash["expected_total"])
+    elif cash["status"] == "closed" and cash["expected_cash"] is not None:
+        # Eventos cerrados con versiones anteriores conservan su criterio histórico.
+        expected_total = float(cash["expected_cash"])
+    else:
+        expected_total = calculated_total
     promoters = promoter_totals(session_id)
     inventory = stock_view_rows(session_id)
     return render_template(
@@ -3066,7 +3094,7 @@ def session_detail(session_id):
         totals=totals,
         by_payment=by_payment,
         movements=movements,
-        expected_cash=expected_cash,
+        expected_total=expected_total,
         promoters=promoters,
         inventory=inventory,
         filters={"type": movement_type, "payment": payment_method},
@@ -3134,7 +3162,7 @@ def settings():
         users = get_db().execute("SELECT * FROM users ORDER BY active DESC, name COLLATE NOCASE").fetchall()
         promoters = get_db().execute("SELECT * FROM promoters WHERE is_common=0 AND is_promo=0 ORDER BY active DESC, name COLLATE NOCASE").fetchall()
         entry_prices = get_db().execute("SELECT * FROM entry_prices WHERE active=1 AND category='general' ORDER BY category").fetchall()
-        beverages = get_db().execute("SELECT * FROM beverage_products WHERE active=1 ORDER BY sort_order, name COLLATE NOCASE").fetchall()
+        beverages = get_db().execute("SELECT * FROM beverage_products WHERE active=1 ORDER BY name COLLATE NOCASE").fetchall()
         beverage_groups = group_beverages(beverages)
         ticketing_products = get_db().execute("SELECT * FROM ticketing_products ORDER BY active DESC, sort_order, name COLLATE NOCASE").fetchall()
         backup_files = [] if is_postgres_url(app.config.get("DATABASE_URL")) else sorted(BACKUP_DIR.glob("floki_*.db"), key=lambda p: p.stat().st_mtime, reverse=True)[:5]
@@ -3313,7 +3341,8 @@ def create_beverage():
         stock_unit = beverage_option(request.form.get("stock_unit"), BEVERAGE_STOCK_UNIT_OPTIONS, "la unidad de stock")
         price = beverage_price_from_option(request.form.get("price"), allow_zero=False)
         approx_yield = suggested_approx_yield(stock_unit, presentation, beverage_type, brand)
-        sort_order = positive_int(request.form.get("sort_order", "100"), "El orden", maximum=10000, allow_zero=True)
+        # El orden ya no se carga manualmente: categoría fija + nombre alfabético.
+        sort_order = 0
         name = build_beverage_name(beverage_type, brand, presentation)
         db = get_db()
         if db.execute("SELECT id FROM beverage_products WHERE active=1 AND lower(name)=lower(?)", (name,)).fetchone():
@@ -3462,7 +3491,7 @@ def offline_bootstrap_payload():
                 "presentation": row["presentation"],
             }
             for row in get_db().execute(
-                "SELECT * FROM beverage_products WHERE active=1 ORDER BY sort_order, name COLLATE NOCASE"
+                "SELECT * FROM beverage_products WHERE active=1 ORDER BY name COLLATE NOCASE"
             ).fetchall()
         ]
         payload["birthdays"] = [
