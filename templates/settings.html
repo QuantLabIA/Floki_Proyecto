@@ -34,14 +34,15 @@
 
       <div class="section-heading subsection-heading" id="bebidas"><div><p class="eyebrow">BEBIDAS</p><h2>Precios y catálogo de bebidas</h2><p class="muted compact-copy">Cada combinación de bebida, marca y presentación es un botón independiente con su propio precio. Así, por ejemplo, Cerveza Quilmes en lata y en vaso no se mezclan.</p></div></div>
       <div class="beverage-settings-list beverage-config-list">
-        <div class="beverage-config-head no-yield"><span>Variante</span><span>Precio</span><span>Stock</span><span>Presentación</span><span>Estado</span></div>
+        <div class="beverage-config-head with-approx-yield"><span>Variante</span><span>Precio</span><span>Stock</span><span>Presentación</span><span>Rend. aprox.</span><span>Acción</span></div>
         {% for beverage in beverages %}
-        <div class="beverage-setting-row beverage-config-row no-yield {% if not beverage['active'] %}inactive-row{% endif %}">
-          <span><strong>{{ beverage['name'] }}</strong><small>{{ beverage['beverage_type'] }} · {{ beverage['brand'] }} · {{ 'Activa' if beverage['active'] else 'Inactiva' }}</small></span>
+        <div class="beverage-setting-row beverage-config-row with-approx-yield">
+          <span><strong>{{ beverage['name'] }}</strong><small>{{ beverage['beverage_type'] }} · {{ beverage['brand'] }}</small></span>
           <select name="beverage_{{ beverage['id'] }}">{% for price in price_options if price > 0 %}<option value="{{ price }}" {% if price == beverage['price'] %}selected{% endif %}>{{ price|money }}</option>{% endfor %}</select>
           <select name="stock_unit_{{ beverage['id'] }}">{% if beverage['stock_unit'] not in beverage_stock_unit_options %}<option value="{{ beverage['stock_unit'] }}" selected>{{ beverage['stock_unit']|title }}</option>{% endif %}{% for option in beverage_stock_unit_options %}<option value="{{ option }}" {% if option == beverage['stock_unit'] %}selected{% endif %}>{{ option|title }}</option>{% endfor %}</select>
           <select name="sale_unit_{{ beverage['id'] }}">{% if beverage['sale_unit'] not in beverage_presentation_options %}<option value="{{ beverage['sale_unit'] }}" selected>{{ beverage['sale_unit']|title }}</option>{% endif %}{% for option in beverage_presentation_options %}<option value="{{ option }}" {% if option == beverage['sale_unit'] %}selected{% endif %}>{{ option|title }}</option>{% endfor %}</select>
-          <button class="secondary-button small-button" type="submit" formaction="{{ url_for('toggle_beverage', beverage_id=beverage['id']) }}" formmethod="post">{{ 'Desactivar' if beverage['active'] else 'Activar' }}</button>
+          <select name="approx_yield_{{ beverage['id'] }}"><option value="0">Automático</option>{% for option in approx_yield_options if option > 0 %}<option value="{{ option }}" {% if option == beverage['approx_yield'] %}selected{% endif %}>≈ {{ option }}</option>{% endfor %}</select>
+          <button class="tiny-danger" type="submit" formaction="{{ url_for('toggle_beverage', beverage_id=beverage['id']) }}" formmethod="post" data-confirm="¿Eliminar {{ beverage['name'] }} del catálogo activo? El historial anterior se conserva.">Eliminar</button>
         </div>
         {% else %}<p class="muted">Todavía no hay variantes de bebidas.</p>{% endfor %}
       </div>
@@ -57,6 +58,7 @@
       <label>Presentación de venta<select name="presentation" required data-beverage-presentation>{% for option in beverage_presentation_options %}<option value="{{ option }}">{{ option|title }}</option>{% endfor %}</select></label>
       <label>Cómo se cuenta el stock<select name="stock_unit" required>{% for option in beverage_stock_unit_options %}<option value="{{ option }}">{{ option|title }}</option>{% endfor %}</select></label>
       <label>Precio<select name="price">{% for price in price_options if price > 0 %}<option value="{{ price }}">{{ price|money }}</option>{% endfor %}</select></label>
+      <label>Rendimiento aproximado<select name="approx_yield"><option value="0">Automático según presentación</option>{% for option in approx_yield_options if option > 0 %}<option value="{{ option }}">≈ {{ option }} por {{ 'unidad de stock' }}</option>{% endfor %}</select><small>Es una referencia; el rendimiento real se calcula al cierre.</small></label>
       <label>Orden<input type="number" name="sort_order" min="0" max="10000" value="100"></label>
       <button class="secondary-button" type="submit">Agregar variante</button>
     </form>

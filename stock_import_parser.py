@@ -35,6 +35,7 @@ TYPE_KEYWORDS = (
 )
 
 PRESENTATIONS = (
+    ("vaso grande 750 ml", ("vaso grande 750", "vaso grande", "750 ml vaso", "vaso 750")),
     ("lata 473 ml", ("473", "473ml")),
     ("lata 354 ml", ("354", "354ml")),
     ("lata 250 ml", ("250", "250ml")),
@@ -43,7 +44,6 @@ PRESENTATIONS = (
     ("botella 710 ml", ("710", "710ml")),
     ("botella 500 ml", ("500", "500ml")),
     ("botella 330 ml", ("330", "330ml")),
-    ("vaso grande", ("vaso grande",)),
     ("vaso chico", ("vaso chico",)),
     ("lata", ("lata",)),
     ("botella", ("botella",)),
@@ -90,6 +90,13 @@ def _xlsx_rows(raw: bytes) -> list[list[str]]:
             sheet_path = clean_target if clean_target.startswith("xl/") else "xl/" + clean_target
             root = ET.fromstring(archive.read(sheet_path))
             rows: list[list[str]] = []
+            def column_index(ref: str) -> int:
+                letters = "".join(char for char in (ref or "") if char.isalpha()).upper()
+                result = 0
+                for char in letters:
+                    result = result * 26 + (ord(char) - 64)
+                return max(0, result - 1)
+
             for row in root.findall(".//m:sheetData/m:row", ns):
                 row_values: list[str] = []
                 for cell in row.findall("m:c", ns):
@@ -104,7 +111,10 @@ def _xlsx_rows(raw: bytes) -> list[list[str]]:
                         if cell_type == "s" and value.isdigit():
                             index = int(value)
                             value = shared[index] if index < len(shared) else ""
-                    row_values.append(str(value).strip())
+                    target_index = column_index(cell.attrib.get("r", ""))
+                    while len(row_values) <= target_index:
+                        row_values.append("")
+                    row_values[target_index] = str(value).strip()
                 if any(row_values):
                     rows.append(row_values)
             return rows
@@ -148,42 +158,49 @@ def _to_number(value: object) -> float | None:
     return round(number, 3)
 
 
-def _rows_to_items(rows: list[list[str]]) -> list[tuple[str, float]]:
+def _rows_to_items(rows: list[list[str]]) -> list[dict]:
     if not rows:
         return []
     header_index = None
     name_col = 0
-    qty_col = 1
+    initial_col = 1
+    final_col = None
     for index, row in enumerate(rows[:20]):
         keys = [normalize(cell) for cell in row]
+        row_has_name = False
         for pos, key in enumerate(keys):
-            if any(word in key for word in ("bebida", "producto", "mercaderia", "descripcion", "articulo")):
+            if any(word in key for word in ("bebida", "producto", "mercaderia", "descripcion", "articulo", "variante")):
                 name_col = pos
-                header_index = index
-            if any(word in key for word in ("cantidad inicial", "stock inicial", "cantidad", "stock", "unidades")):
-                qty_col = pos
-                header_index = index
-        if header_index is not None:
+                row_has_name = True
+            if any(word in key for word in ("cantidad inicial", "stock inicial", "inicial")):
+                initial_col = pos
+            elif any(word in key for word in ("cantidad final", "stock final", "final manual", "final")):
+                final_col = pos
+        if row_has_name and any("inicial" in key or key in {"cantidad", "stock", "unidades"} for key in keys):
+            for pos, key in enumerate(keys):
+                if key in {"cantidad", "stock", "unidades"} and not any("final" in k for k in keys):
+                    initial_col = pos
+            header_index = index
             break
 
     data_rows = rows[(header_index + 1) if header_index is not None else 0:]
-    items: list[tuple[str, float]] = []
+    items: list[dict] = []
     for row in data_rows:
         if not row:
             continue
         name = row[name_col].strip() if name_col < len(row) else ""
-        quantity = _to_number(row[qty_col]) if qty_col < len(row) else None
-        if not name or quantity is None:
-            # Fallback: primer texto y primer número distinto.
+        initial = _to_number(row[initial_col]) if initial_col < len(row) else None
+        final = _to_number(row[final_col]) if final_col is not None and final_col < len(row) else None
+        if header_index is None and (not name or initial is None):
             name = next((cell.strip() for cell in row if cell.strip() and _to_number(cell) is None), "")
-            quantity = next((_to_number(cell) for cell in row if _to_number(cell) is not None), None)
-        if name and quantity is not None and normalize(name) not in {"total", "subtotal"}:
-            items.append((name[:120], quantity))
+            initial = next((_to_number(cell) for cell in row if _to_number(cell) is not None), None)
+        if name and initial is not None and normalize(name) not in {"total", "subtotal"}:
+            items.append({"raw_name": name[:120], "initial_quantity": initial, "final_quantity": final})
     return items
 
 
-def _lines_to_items(lines: list[str]) -> list[tuple[str, float]]:
-    items: list[tuple[str, float]] = []
+def _lines_to_items(lines: list[str]) -> list[dict]:
+    items: list[dict] = []
     for line in lines:
         clean = re.sub(r"\s+", " ", line).strip()
         if not clean:
@@ -200,7 +217,7 @@ def _lines_to_items(lines: list[str]) -> list[tuple[str, float]]:
             name = match.group(1).strip(" -|;:")
             qty = _to_number(match.group(2))
         if qty is not None and name and normalize(name) not in {"total", "subtotal"}:
-            items.append((name[:120], qty))
+            items.append({"raw_name": name[:120], "initial_quantity": qty, "final_quantity": None})
     return items
 
 
@@ -236,6 +253,8 @@ def classify_product(raw_name: str, brands: tuple[str, ...]) -> dict:
         stock_unit = "lata"
     elif presentation.startswith("botella"):
         stock_unit = "botella"
+    elif presentation in {"vaso", "vaso chico", "vaso grande 750 ml", "copa", "shot", "jarra", "balde"} and beverage_type not in {"Cerveza", "Energizante", "Gaseosa", "Agua"}:
+        stock_unit = "botella"
     elif presentation == "pack":
         stock_unit = "pack"
     elif presentation == "caja":
@@ -269,12 +288,21 @@ def parse_stock_file(file_storage, brands: tuple[str, ...]) -> tuple[str, list[d
         raise ValueError("No se encontraron filas con bebida y cantidad. Usá columnas o líneas con nombre y cantidad")
 
     merged: dict[str, dict] = {}
-    for raw_name, quantity in parsed:
+    for parsed_item in parsed:
+        raw_name = parsed_item["raw_name"]
+        initial_quantity = parsed_item["initial_quantity"]
+        final_quantity = parsed_item.get("final_quantity")
         item = classify_product(raw_name, brands)
         key = normalize(raw_name)
         if key in merged:
-            merged[key]["quantity"] = round(merged[key]["quantity"] + quantity, 3)
+            merged[key]["initial_quantity"] = round(merged[key]["initial_quantity"] + initial_quantity, 3)
+            merged[key]["quantity"] = merged[key]["initial_quantity"]
+            if final_quantity is not None:
+                previous_final = merged[key].get("final_quantity")
+                merged[key]["final_quantity"] = round((previous_final or 0) + final_quantity, 3)
         else:
-            item["quantity"] = quantity
+            item["initial_quantity"] = initial_quantity
+            item["final_quantity"] = final_quantity
+            item["quantity"] = initial_quantity  # compatibilidad con integraciones anteriores
             merged[key] = item
     return filename[:180], list(merged.values())

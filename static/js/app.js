@@ -61,7 +61,7 @@ document.querySelectorAll('[data-quick-category]').forEach((button) => {
 updateSaleFields();
 
 setTimeout(() => document.querySelectorAll('.flash').forEach((element) => element.remove()), 4500);
-// v2.7: Service Worker seguro. No intercepta ni cachea HTML/dashboards.
+// v2.8: Service Worker seguro. No intercepta ni cachea HTML/dashboards.
 // Se registra solamente para mantener la instalación PWA y retirar cachés viejos.
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', async () => {
@@ -78,7 +78,7 @@ if (document.documentElement.dataset.flokiAuthenticated === '1') {
     window.setTimeout(() => {
       if (document.querySelector('script[data-floki-offline-safe]')) return;
       const script = document.createElement('script');
-      script.src = `/static/js/offline-sync.js?v=${encodeURIComponent(document.querySelector('.brand-copy small')?.textContent || '2.7.0')}`;
+      script.src = `/static/js/offline-sync.js?v=${encodeURIComponent(document.querySelector('.brand-copy small')?.textContent || '2.8.0')}`;
       script.defer = true;
       script.dataset.flokiOfflineSafe = '1';
       script.onerror = () => console.warn('Floki Offline Seguro no pudo cargarse; la aplicación continúa online.');

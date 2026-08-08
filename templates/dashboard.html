@@ -35,33 +35,27 @@
   {% endif %}
 </section>
 {% else %}
-<section class="hero-row event-hero-banner" style="background-image:url('{{ url_for('event_banner', session_id=cash['id']) }}?v={{ cash['event_image_name'] or 'default' }}')">
+{% if g.user['role']!='admin' %}
+<section class="hero-row event-hero-banner operator-event-banner" style="background-image:url('{{ url_for('event_banner', session_id=cash['id']) }}?v={{ cash['event_image_name'] or 'default' }}')">
   <div class="event-hero-overlay"></div>
   <div class="event-hero-content">
-    <p class="eyebrow"><span class="live-dot"></span> EVENTO ABIERTO · #{{ cash['id'] }} · {{ cash['event_date']|date_ar }}</p>
+    <p class="eyebrow"><span class="live-dot"></span> EVENTO ABIERTO · {{ cash['event_date']|date_ar }}</p>
     <h1>{{ cash['event_name'] }}</h1>
-    {% if g.user['role']=='admin' %}
-    <p class="hero-money">{{ expected_cash|money }}</p>
-    <p class="event-hero-muted">Efectivo esperado · abierta por {{ cash['opened_by_name'] }}</p>
-    {% else %}
     <p class="sector-hero-label">{{ sector_labels.get(sector, sector) }} - {{ g.user['name'] }}</p>
-    <p class="event-hero-muted">Los resultados y ganancias solo están disponibles para administración.</p>
-    {% endif %}
   </div>
-  {% if g.user['role']=='admin' %}<div class="event-hero-actions"><button class="secondary-button glass-button" data-modal-open="event-banner-modal">Cambiar imagen</button><button class="secondary-button glass-button" data-modal-open="close-cash-modal">Cerrar caja</button></div>{% endif %}
 </section>
+{% endif %}
 
 {% if g.user['role']=='admin' %}
-<section class="admin-priority-grid">
+<section class="admin-priority-grid single-priority-panel">
   {% set compact_list_panel = true %}{% set smart_list_return = 'dashboard' %}{% set smart_list_title = 'Cargar y actualizar listas' %}{% include '_smart_list_import.html' %}
-  {% set compact_stock_panel = true %}{% set smart_stock_return = 'dashboard' %}{% set smart_stock_title = 'Cargar stock desde archivo' %}{% include '_stock_import.html' %}
 </section>
 
 <section class="metric-grid admin-metrics statistics-after-actions">
   <article class="metric-card metric-sales"><i class="metric-icon">▣</i><span>Ventas</span><strong>{{ totals['sales']|money }}</strong><small>Bruto registrado</small></article>
-  <article class="metric-card metric-expenses"><i class="metric-icon">−</i><span>Gastos</span><strong>{{ totals['expenses']|money }}</strong><small>Todos los medios</small></article>
+  <article class="metric-card metric-tickets"><i class="metric-icon">⌑</i><span>Tickets vendidos</span><strong>{{ totals['paid_count'] }}</strong><small>Entradas generales pagas</small></article>
   <article class="metric-card metric-people"><i class="metric-icon">♙</i><span>Ingresos</span><strong>{{ totals['people_count'] }}</strong><small>{{ totals['paid_count'] }} pagos · {{ totals['free_count'] }} free/lista</small></article>
-  <article class="metric-card metric-drinks"><i class="metric-icon">◉</i><span>Bebidas</span><strong>{{ totals['drink_count'] }}</strong><small>{{ totals['cloakroom_count'] }} guardarropas registrados</small></article>
+  <article class="metric-card metric-cloakroom"><i class="metric-icon">⌁</i><span>Guardarropa</span><strong>{{ totals['cloakroom_count'] }}</strong><small>Prendas registradas</small></article>
 </section>
 {% elif sector=='ticketing' %}
 <section class="card operator-search-first">
@@ -85,7 +79,7 @@
 <section class="card quick-sale-panel">
   <div class="section-heading quick-heading">
     <div><p class="eyebrow">VENTA RÁPIDA · {{ sector_labels.get(sector, sector) }}</p><h2>Un toque para registrar</h2><p class="muted compact-copy">Los precios se toman de Configuración y no se escriben en cada venta.</p></div>
-    <div class="button-row">{% if show_entries %}<a class="secondary-button" href="{{ url_for('promoter_lists') }}">FREE por listas</a>{% endif %}{% if show_beverages %}<a class="secondary-button" href="{{ url_for('stock') }}">{{ 'Control parcial y stock' if g.user['role']=='admin' else 'Conteo de stock' }}</a>{% endif %}</div>
+    <div class="button-row">{% if show_entries %}<a class="secondary-button" href="{{ url_for('promoter_lists') }}">FREE por listas</a>{% endif %}{% if show_beverages and g.user['role']!='admin' %}<a class="secondary-button" href="{{ url_for('stock') }}">Conteo de stock</a>{% endif %}</div>
   </div>
 
   <div class="quick-controls {% if not show_entries %}two-controls{% endif %}">
@@ -154,26 +148,9 @@
   </form>
   {% endfor %}
   <button class="action-card sale" data-modal-open="special-beverage-modal"><span>＋</span><strong>Bebida especial</strong><small>Precio variable y comentario obligatorio</small></button>
-  <a class="action-card stock-action" href="{{ url_for('stock') }}"><span>▦</span><strong>{{ 'Ventas parciales' if g.user['role']=='admin' else 'Conteo de stock' }}</strong><small>{{ 'Ver unidades vendidas y completar el stock final' if g.user['role']=='admin' else 'Cargar cantidades sin acceder a los totales vendidos' }}</small></a>
+  {% if g.user['role']!='admin' %}<a class="action-card stock-action" href="{{ url_for('stock') }}"><span>▦</span><strong>Conteo de stock</strong><small>Cargar cantidades sin acceder a los totales vendidos</small></a>{% endif %}
 </section>
 
-{% if beverage_progress %}
-<section class="card beverage-progress-card">
-  <div class="section-heading"><div><p class="eyebrow">CONTROL PARCIAL</p><h2>Bebidas vendidas hasta ahora</h2><p class="muted compact-copy">Las ventas se muestran en vasos, latas o botellas. El rendimiento real se calcula recién cuando se carga el stock final.</p></div><a href="{{ url_for('stock') }}">Abrir stock completo</a></div>
-  <div class="beverage-progress-wrap">
-    <div class="beverage-progress-grid auto-yield-progress beverage-progress-head"><span>Bebida</span><span>Normales</span><span>Especiales</span><span>Beneficios</span><span>Total vendido</span><span>Stock final</span><span>Rendimiento</span></div>
-    {% for row in beverage_progress %}
-    <div class="beverage-progress-grid auto-yield-progress">
-      <span><strong>{{ row['beverage_name'] }}</strong><small>{{ row['sale_unit'] }} / stock: {{ row['stock_unit'] }}</small></span>
-      <b>{{ row['regular_quantity'] }}</b><b>{{ row['special_quantity'] }}</b><b>{{ row['benefit_quantity'] }}</b>
-      <b>{{ row['sold_quantity'] }} {{ row['sale_unit'] }}</b>
-      <b>{{ 'Pendiente' if row['final_quantity'] is none else row['final_quantity'] ~ ' ' ~ row['stock_unit'] }}</b>
-      <b>{{ row['yield_status'] if row['observed_yield'] is none else row['observed_yield'] ~ ' ' ~ row['sale_unit'] ~ ' / ' ~ row['stock_unit'] }}</b>
-    </div>
-    {% endfor %}
-  </div>
-</section>
-{% endif %}
 {% endif %}
 
 {% if g.user['role']!='admin' and sector=='ticketing' %}
@@ -219,6 +196,22 @@
       </div>
     {% endfor %}{% else %}<p class="muted">Todavía no hay movimientos en este sector.</p>{% endif %}
   </div>
+</section>
+{% endif %}
+
+{% if g.user['role']=='admin' %}
+<section class="admin-event-organization">
+  <div class="section-heading"><div><p class="eyebrow">ORGANIZACIÓN</p><h2>Evento abierto</h2><p class="muted compact-copy">La imagen, el estado de la jornada y el cierre quedan al final del dashboard.</p></div></div>
+  <section class="hero-row event-hero-banner admin-event-banner" style="background-image:url('{{ url_for('event_banner', session_id=cash['id']) }}?v={{ cash['event_image_name'] or 'default' }}')">
+    <div class="event-hero-overlay"></div>
+    <div class="event-hero-content">
+      <p class="eyebrow"><span class="live-dot"></span> EVENTO ABIERTO · #{{ cash['id'] }} · {{ cash['event_date']|date_ar }}</p>
+      <h1>{{ cash['event_name'] }}</h1>
+      <p class="hero-money">{{ expected_cash|money }}</p>
+      <p class="event-hero-muted">Efectivo esperado · abierta por {{ cash['opened_by_name'] }}</p>
+    </div>
+    <div class="event-hero-actions"><button class="secondary-button glass-button" data-modal-open="event-banner-modal">Cambiar imagen</button><button class="secondary-button glass-button" data-modal-open="close-cash-modal">Cerrar caja</button></div>
+  </section>
 </section>
 {% endif %}
 

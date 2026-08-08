@@ -40,7 +40,7 @@ from database import (
     is_postgres_url,
 )
 
-from stock_xlsx import build_stock_workbook
+from stock_xlsx import build_stock_workbook, build_stock_template_workbook
 from lists_xlsx import build_lists_workbook
 from stock_logic import calculate_event_yield
 from stock_import_parser import parse_stock_file, normalize as normalize_stock_text
@@ -67,7 +67,7 @@ DATA_DIR = BASE_DIR / "data"
 BACKUP_DIR = BASE_DIR / "backups"
 DATABASE = DATA_DIR / "floki.db"
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
-APP_VERSION = "2.7.0"
+APP_VERSION = "2.8.0"
 
 PAYMENT_METHODS = {"cash", "mercadopago", "transfer", "debit", "credit", "other"}
 # Las categorías advance/vip se conservan únicamente para leer eventos históricos.
@@ -100,11 +100,12 @@ BEVERAGE_BRAND_OPTIONS = (
     "Villavicencio", "Eco de los Andes", "Kin", "Chandon", "Norton", "Zuccardi",
 )
 BEVERAGE_PRESENTATION_OPTIONS = (
-    "vaso", "vaso chico", "vaso grande", "lata", "lata 250 ml", "lata 354 ml",
+    "vaso", "vaso chico", "vaso grande 750 ml", "lata", "lata 250 ml", "lata 354 ml",
     "lata 473 ml", "botella", "botella 330 ml", "botella 500 ml", "botella 710 ml",
     "botella 750 ml", "botella 1 l", "copa", "shot", "jarra", "balde", "unidad",
 )
 BEVERAGE_STOCK_UNIT_OPTIONS = ("botella", "lata", "caja", "pack", "barril", "bidón", "unidad")
+APPROX_YIELD_OPTIONS = tuple([0.0] + [step / 2 for step in range(2, 41)])  # 1 a 20 por unidad de stock
 
 EVENT_IMAGE_MAX_BYTES = 6 * 1024 * 1024
 EVENT_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
@@ -295,6 +296,24 @@ def beverage_option(value, allowed, label):
 def build_beverage_name(beverage_type, brand, presentation):
     base = beverage_type if brand == "Sin marca" else f"{beverage_type} {brand}"
     return f"{base} · {presentation.title()}"[:80]
+
+
+def suggested_approx_yield(stock_unit, sale_unit):
+    """Referencia editable; nunca reemplaza el rendimiento real del cierre."""
+    stock_key = str(stock_unit or "").casefold()
+    sale_key = str(sale_unit or "").casefold()
+    if stock_key in {"lata", "botella", "unidad"} and (sale_key.startswith(stock_key) or sale_key == "unidad"):
+        return 1.0
+    if stock_key == "botella":
+        if sale_key == "shot":
+            return 20.0
+        if sale_key == "copa":
+            return 6.0
+        if sale_key == "vaso chico":
+            return 12.0
+        if sale_key in {"vaso", "vaso grande 750 ml"}:
+            return 8.0
+    return 0.0
 
 
 def normalize_guest_name(value):
@@ -627,6 +646,7 @@ def init_db():
                 stock_unit TEXT NOT NULL DEFAULT 'unidad',
                 sale_unit TEXT NOT NULL DEFAULT 'unidad',
                 servings_per_stock_unit REAL NOT NULL DEFAULT 1,
+                approx_yield REAL NOT NULL DEFAULT 0,
                 active INTEGER NOT NULL DEFAULT 1,
                 sort_order INTEGER NOT NULL DEFAULT 0,
                 updated_at TEXT NOT NULL
@@ -810,6 +830,7 @@ def init_db():
         add_column_if_missing(db, "beverage_products", "stock_unit", "TEXT NOT NULL DEFAULT 'unidad'")
         add_column_if_missing(db, "beverage_products", "sale_unit", "TEXT NOT NULL DEFAULT 'unidad'")
         add_column_if_missing(db, "beverage_products", "servings_per_stock_unit", "REAL NOT NULL DEFAULT 1")
+        add_column_if_missing(db, "beverage_products", "approx_yield", "REAL NOT NULL DEFAULT 0")
         add_column_if_missing(db, "beverage_products", "beverage_type", "TEXT NOT NULL DEFAULT 'Otro'")
         add_column_if_missing(db, "beverage_products", "brand", "TEXT NOT NULL DEFAULT 'Sin marca'")
         add_column_if_missing(db, "beverage_products", "presentation", "TEXT NOT NULL DEFAULT 'unidad'")
@@ -836,6 +857,7 @@ def init_db():
         db.execute("UPDATE beverage_products SET beverage_type=name WHERE beverage_type IS NULL OR trim(beverage_type)='' OR beverage_type='Otro'")
         db.execute("UPDATE beverage_products SET brand='Sin marca' WHERE brand IS NULL OR trim(brand)=''")
         db.execute("UPDATE beverage_products SET presentation=sale_unit WHERE presentation IS NULL OR trim(presentation)='' OR presentation='unidad'")
+        db.execute("UPDATE beverage_products SET sale_unit='vaso grande 750 ml', presentation='vaso grande 750 ml' WHERE lower(sale_unit)='vaso grande'")
         # VIP, anticipadas y FREE manual quedan fuera de las nuevas ventas.
         db.execute("UPDATE entry_prices SET active=0 WHERE category IN ('advance','vip','free')")
         db.execute("UPDATE price_presets SET active=0 WHERE category IN ('advance','vip','free')")
@@ -844,6 +866,27 @@ def init_db():
         db.execute("UPDATE beverage_products SET stock_unit='lata', sale_unit='lata', servings_per_stock_unit=1 WHERE name='Energizante' AND stock_unit='unidad' AND sale_unit='unidad'")
         db.execute("UPDATE beverage_products SET stock_unit='botella', sale_unit='vaso', servings_per_stock_unit=1 WHERE name='Trago' AND stock_unit='unidad' AND sale_unit='unidad'")
         db.execute("UPDATE movements SET stock_units=quantity WHERE beverage_product_id IS NOT NULL AND (stock_units IS NULL OR stock_units=0) AND category IN ('drink','drink_special','rrpp_benefit','birthday_benefit','birthday_discount')")
+
+        for beverage in db.execute("SELECT * FROM beverage_products ORDER BY id").fetchall():
+            sale_unit = beverage["sale_unit"] or "unidad"
+            beverage_type = beverage["beverage_type"] or beverage["name"]
+            brand = beverage["brand"] or "Sin marca"
+            desired_name = build_beverage_name(beverage_type, brand, sale_unit)
+            duplicate = db.execute("SELECT id FROM beverage_products WHERE lower(name)=lower(?) AND id<>?", (desired_name, beverage["id"])).fetchone()
+            if not duplicate and desired_name != beverage["name"]:
+                db.execute("UPDATE beverage_products SET name=? WHERE id=?", (desired_name, beverage["id"]))
+                db.execute("UPDATE beverage_stock SET beverage_name=? WHERE beverage_id=?", (desired_name, beverage["id"]))
+            if float(beverage["approx_yield"] or 0) <= 0:
+                suggested = suggested_approx_yield(beverage["stock_unit"], sale_unit)
+                if suggested > 0:
+                    db.execute("UPDATE beverage_products SET approx_yield=? WHERE id=?", (suggested, beverage["id"]))
+
+        for inactive in db.execute("SELECT id, name FROM beverage_products WHERE active=0 ORDER BY id").fetchall():
+            if "archivada #" not in (inactive["name"] or "").casefold():
+                archived_name = f"{(inactive['name'] or 'Bebida')[:55]} · archivada #{inactive['id']}"[:80]
+                duplicate_name = db.execute("SELECT id FROM beverage_products WHERE lower(name)=lower(?) AND id<>?", (archived_name, inactive["id"])).fetchone()
+                if not duplicate_name:
+                    db.execute("UPDATE beverage_products SET name=? WHERE id=?", (archived_name, inactive["id"]))
 
         for promoter in db.execute("SELECT * FROM promoters ORDER BY id").fetchall():
             normalized_key = normalize_text_key(promoter["name"])
@@ -975,6 +1018,7 @@ def inject_helpers():
         "beverage_brand_options": BEVERAGE_BRAND_OPTIONS,
         "beverage_presentation_options": BEVERAGE_PRESENTATION_OPTIONS,
         "beverage_stock_unit_options": BEVERAGE_STOCK_UNIT_OPTIONS,
+        "approx_yield_options": APPROX_YIELD_OPTIONS,
         "common_free_cutoff_label": FREE_ENTRY_CUTOFF_LABEL,
         "common_free_open": free_entry_available(),
     }
@@ -1122,7 +1166,7 @@ def initialize_event_stock(db, cash_session_id, user_id):
 
 def event_stock_rows(cash_session_id):
     return get_db().execute(
-        """SELECT bs.*, bp.stock_unit, bp.sale_unit, bp.servings_per_stock_unit,
+        """SELECT bs.*, bp.stock_unit, bp.sale_unit, bp.servings_per_stock_unit, bp.approx_yield,
                   COALESCE(SUM(CASE WHEN m.voided=0 AND m.movement_type='sale' THEN m.quantity ELSE 0 END), 0) AS sold_quantity,
                   COALESCE(SUM(CASE WHEN m.voided=0 AND m.category='drink' THEN m.quantity ELSE 0 END), 0) AS regular_quantity,
                   COALESCE(SUM(CASE WHEN m.voided=0 AND m.category IN ('drink_special','birthday_discount') THEN m.quantity ELSE 0 END), 0) AS special_quantity,
@@ -1152,6 +1196,9 @@ def stock_view_rows(cash_session_id):
         item["consumed_stock"] = physical_consumed
         item["observed_yield"] = observed_yield
         item["yield_status"] = yield_status
+        approx_yield = float(item.get("approx_yield") or 0)
+        item["approx_yield"] = approx_yield
+        item["approx_consumed"] = round(item["sold_quantity"] / approx_yield, 2) if approx_yield > 0 else None
         item["expected_final"] = None
         item["difference"] = None
         rows.append(item)
@@ -1298,7 +1345,7 @@ def dashboard():
                WHERE pg.cash_session_id=? AND gc.id IS NULL""",
             (cash["id"],),
         ).fetchone()[0] if show_entries else 0
-        beverage_progress = stock_view_rows(cash["id"]) if g.user["role"] == "admin" else []
+        beverage_progress = []  # El control parcial vive únicamente en la pestaña Stock
     else:
         totals = by_payment = movements = promoter_summary = None
         beverage_progress = []
@@ -2559,7 +2606,7 @@ def delete_guest(guest_id):
 
 
 def match_imported_beverage(db, item):
-    rows = db.execute("SELECT * FROM beverage_products ORDER BY active DESC, id").fetchall()
+    rows = db.execute("SELECT * FROM beverage_products WHERE active=1 ORDER BY id").fetchall()
     raw_key = normalize_stock_text(item["raw_name"])
     exact = None
     if item["beverage_type"] != "Otro":
@@ -2599,7 +2646,7 @@ def create_imported_beverage(db, item):
     else:
         name = build_beverage_name(beverage_type, brand, presentation)
 
-    duplicate = db.execute("SELECT * FROM beverage_products WHERE lower(name)=lower(?)", (name,)).fetchone()
+    duplicate = db.execute("SELECT * FROM beverage_products WHERE active=1 AND lower(name)=lower(?)", (name,)).fetchone()
     if duplicate:
         db.execute("UPDATE beverage_products SET active=1, updated_at=? WHERE id=?", (now_iso(), duplicate["id"]))
         return db.execute("SELECT * FROM beverage_products WHERE id=?", (duplicate["id"],)).fetchone()
@@ -2610,12 +2657,13 @@ def create_imported_beverage(db, item):
     ).fetchone()
     price = float(similar["price"]) if similar else 1000.0
     max_order = db.execute("SELECT COALESCE(MAX(sort_order), 0) FROM beverage_products").fetchone()[0]
+    approx_yield = suggested_approx_yield(item["stock_unit"], presentation)
     cursor = db.execute(
         """INSERT INTO beverage_products(
-               name, price, stock_unit, sale_unit, servings_per_stock_unit,
+               name, price, stock_unit, sale_unit, servings_per_stock_unit, approx_yield,
                beverage_type, brand, presentation, active, sort_order, updated_at
-           ) VALUES (?, ?, ?, ?, 1, ?, ?, ?, 1, ?, ?)""",
-        (name, price, item["stock_unit"], presentation, beverage_type, brand, presentation, int(max_order or 0) + 10, now_iso()),
+           ) VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, 1, ?, ?)""",
+        (name, price, item["stock_unit"], presentation, approx_yield, beverage_type, brand, presentation, int(max_order or 0) + 10, now_iso()),
     )
     return db.execute("SELECT * FROM beverage_products WHERE id=?", (cursor.lastrowid,)).fetchone()
 
@@ -2647,12 +2695,20 @@ def import_stock():
                 product = create_imported_beverage(db, item)
                 created += 1
             ensure_beverage_in_event_stock(db, cash["id"], product, g.user["id"])
-            db.execute(
-                """UPDATE beverage_stock
-                   SET initial_quantity=?, beverage_name=?, updated_at=?, updated_by=?
-                   WHERE cash_session_id=? AND beverage_id=?""",
-                (item["quantity"], product["name"], now_iso(), g.user["id"], cash["id"], product["id"]),
-            )
+            if item.get("final_quantity") is None:
+                db.execute(
+                    """UPDATE beverage_stock
+                       SET initial_quantity=?, beverage_name=?, updated_at=?, updated_by=?
+                       WHERE cash_session_id=? AND beverage_id=?""",
+                    (item["initial_quantity"], product["name"], now_iso(), g.user["id"], cash["id"], product["id"]),
+                )
+            else:
+                db.execute(
+                    """UPDATE beverage_stock
+                       SET initial_quantity=?, final_quantity=?, beverage_name=?, updated_at=?, updated_by=?
+                       WHERE cash_session_id=? AND beverage_id=?""",
+                    (item["initial_quantity"], item["final_quantity"], product["name"], now_iso(), g.user["id"], cash["id"], product["id"]),
+                )
         db.commit()
     except (ValueError, *DB_INTEGRITY_ERRORS) as exc:
         get_db().rollback()
@@ -2660,7 +2716,7 @@ def import_stock():
         return redirect(url_for(redirect_endpoint))
 
     flash(
-        f"Stock cargado desde {filename}: {len(items)} productos categorizados; {matched} vinculados y {created} variantes nuevas. "
+        f"Stock cargado desde {filename}: {len(items)} productos procesados; {matched} vinculados y {created} variantes nuevas. "
         "Revisá las variantes nuevas antes de venderlas.",
         "success",
     )
@@ -2731,6 +2787,22 @@ def update_stock():
         db.rollback()
         flash(str(exc), "error")
     return redirect(url_for("stock", session_id=cash["id"] if cash["status"] == "closed" else None))
+
+
+@app.route("/stock/template.xlsx")
+@admin_required
+def download_stock_template_xlsx():
+    cash = get_open_cash_session()
+    if not cash:
+        flash("Abrí un evento antes de descargar la planilla de conteo.", "error")
+        return redirect(url_for("dashboard"))
+    db = get_db()
+    initialize_event_stock(db, cash["id"], g.user["id"])
+    db.commit()
+    rows = stock_view_rows(cash["id"])
+    payload = build_stock_template_workbook(cash["event_name"], cash["event_date"], rows)
+    filename = f"planilla_stock_floki_{cash['event_date']}_evento_{cash['id']}.xlsx"
+    return Response(payload, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={"Content-Disposition": f"attachment; filename={filename}"})
 
 
 @app.route("/stock/export.xlsx")
@@ -2919,7 +2991,7 @@ def settings():
         users = get_db().execute("SELECT * FROM users ORDER BY active DESC, name COLLATE NOCASE").fetchall()
         promoters = get_db().execute("SELECT * FROM promoters WHERE is_common=0 AND is_promo=0 ORDER BY active DESC, name COLLATE NOCASE").fetchall()
         entry_prices = get_db().execute("SELECT * FROM entry_prices WHERE active=1 AND category='general' ORDER BY category").fetchall()
-        beverages = get_db().execute("SELECT * FROM beverage_products ORDER BY active DESC, sort_order, name COLLATE NOCASE").fetchall()
+        beverages = get_db().execute("SELECT * FROM beverage_products WHERE active=1 ORDER BY sort_order, name COLLATE NOCASE").fetchall()
         ticketing_products = get_db().execute("SELECT * FROM ticketing_products ORDER BY active DESC, sort_order, name COLLATE NOCASE").fetchall()
         backup_files = [] if is_postgres_url(app.config.get("DATABASE_URL")) else sorted(BACKUP_DIR.glob("floki_*.db"), key=lambda p: p.stat().st_mtime, reverse=True)[:5]
     else:
@@ -3066,7 +3138,11 @@ def update_prices():
                 duplicate = db.execute("SELECT id FROM beverage_products WHERE lower(name)=lower(?) AND id<>?", (updated_name, beverage["id"])).fetchone()
                 if duplicate:
                     raise ValueError(f"Ya existe la variante {updated_name}")
-                db.execute("UPDATE beverage_products SET name=?, price=?, stock_unit=?, sale_unit=?, presentation=?, servings_per_stock_unit=1, updated_at=? WHERE id=?", (updated_name, price, stock_unit, sale_unit, sale_unit, now_iso(), beverage["id"]))
+                approx_raw = request.form.get(f"approx_yield_{beverage['id']}", "0")
+                approx_yield = non_negative_number(approx_raw or "0", "El rendimiento aproximado", maximum=100, allow_zero=True)
+                if approx_yield == 0:
+                    approx_yield = suggested_approx_yield(stock_unit, sale_unit)
+                db.execute("UPDATE beverage_products SET name=?, price=?, stock_unit=?, sale_unit=?, presentation=?, servings_per_stock_unit=1, approx_yield=?, updated_at=? WHERE id=?", (updated_name, price, stock_unit, sale_unit, sale_unit, approx_yield, now_iso(), beverage["id"]))
                 db.execute("UPDATE beverage_stock SET beverage_name=? WHERE beverage_id=?", (updated_name, beverage["id"]))
         db.commit()
         flash("Precio de entrada general, guardarropa y variantes de bebidas actualizados.", "success")
@@ -3094,17 +3170,21 @@ def create_beverage():
         presentation = beverage_option(request.form.get("presentation"), BEVERAGE_PRESENTATION_OPTIONS, "la presentación")
         stock_unit = beverage_option(request.form.get("stock_unit"), BEVERAGE_STOCK_UNIT_OPTIONS, "la unidad de stock")
         price = price_from_option(request.form.get("price"), allow_zero=False)
+        approx_raw = request.form.get("approx_yield", "0")
+        approx_yield = non_negative_number(approx_raw or "0", "El rendimiento aproximado", maximum=100, allow_zero=True)
+        if approx_yield == 0:
+            approx_yield = suggested_approx_yield(stock_unit, presentation)
         sort_order = positive_int(request.form.get("sort_order", "100"), "El orden", maximum=10000, allow_zero=True)
         name = build_beverage_name(beverage_type, brand, presentation)
         db = get_db()
-        if db.execute("SELECT id FROM beverage_products WHERE lower(name)=lower(?)", (name,)).fetchone():
+        if db.execute("SELECT id FROM beverage_products WHERE active=1 AND lower(name)=lower(?)", (name,)).fetchone():
             raise ValueError("Ya existe esa combinación de bebida, marca y presentación")
         cursor = db.execute(
             """INSERT INTO beverage_products(
-                   name, price, stock_unit, sale_unit, servings_per_stock_unit,
+                   name, price, stock_unit, sale_unit, servings_per_stock_unit, approx_yield,
                    beverage_type, brand, presentation, active, sort_order, updated_at
-               ) VALUES (?, ?, ?, ?, 1, ?, ?, ?, 1, ?, ?)""",
-            (name, price, stock_unit, presentation, beverage_type, brand, presentation, sort_order, now_iso()),
+               ) VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, 1, ?, ?)""",
+            (name, price, stock_unit, presentation, approx_yield, beverage_type, brand, presentation, sort_order, now_iso()),
         )
         product = db.execute("SELECT * FROM beverage_products WHERE id=?", (cursor.lastrowid,)).fetchone()
         cash = get_open_cash_session()
@@ -3132,16 +3212,14 @@ def toggle_beverage(beverage_id):
     if not product:
         abort(404)
     db = get_db()
-    new_active = 0 if product["active"] else 1
-    db.execute("UPDATE beverage_products SET active=?, updated_at=? WHERE id=?", (new_active, now_iso(), beverage_id))
-    if new_active:
-        cash = get_open_cash_session()
-        if cash:
-            refreshed = db.execute("SELECT * FROM beverage_products WHERE id=?", (beverage_id,)).fetchone()
-            ensure_beverage_in_event_stock(db, cash["id"], refreshed, g.user["id"])
+    if not product["active"]:
+        flash("La bebida ya está fuera del catálogo.", "success")
+        return redirect(url_for("settings") + "#bebidas")
+    archived_name = f"{(product['name'] or 'Bebida')[:55]} · archivada #{beverage_id}"[:80]
+    db.execute("UPDATE beverage_products SET name=?, active=0, updated_at=? WHERE id=?", (archived_name, now_iso(), beverage_id))
     db.commit()
-    flash("Estado de la bebida actualizado. Si quedó activa, ya está incluida en el stock y Excel del evento.", "success")
-    return redirect(url_for("settings"))
+    flash("Bebida eliminada del catálogo activo. El historial de eventos anteriores se conserva.", "success")
+    return redirect(url_for("settings") + "#bebidas")
 
 
 

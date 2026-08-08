@@ -1330,3 +1330,31 @@ body.app-page { min-height: 100vh !important; color: #f8f7fb !important; }
 }
 .offline-pending-control strong { color: #d78cff; }
 .offline-pending-control.has-conflicts { border-color: rgba(255,92,114,.55); }
+
+/* v2.8 · stock y dashboard simplificados */
+.admin-priority-grid.single-priority-panel { grid-template-columns: 1fr; }
+.admin-event-organization { margin-top: 22px; }
+.admin-event-organization > .section-heading { margin-bottom: 10px; }
+.operator-event-banner { margin-bottom: 16px; }
+.simplified-stock-wrap { overflow-x: auto; }
+.simplified-admin-stock { grid-template-columns: minmax(240px,1.7fr) 120px 130px 160px 130px minmax(150px,1fr); min-width: 980px; }
+.simplified-admin-stock strong:first-child { display: grid; gap: 3px; }
+.simplified-admin-stock strong:first-child small,
+.stock-counter small,
+.approx-consumption small,
+.yield-result small { display: block; color: var(--muted); font-size: .68rem; font-weight: 600; }
+.stock-counter { color: #f2e7ff; font-size: 1.05rem; }
+.approx-consumption { display: grid; gap: 3px; color: var(--violet-soft); font-weight: 750; }
+.simplified-stock-help { border-color: rgba(185,76,255,.20); }
+.beverage-config-head.with-approx-yield,
+.beverage-config-row.with-approx-yield { grid-template-columns: minmax(190px,1.35fr) 125px 115px 150px 125px 90px; }
+.admin-event-banner { margin-bottom: 0; }
+.metric-tickets .metric-icon,
+.metric-cloakroom .metric-icon { color: var(--violet-soft); }
+
+@media (max-width: 720px) {
+  .simplified-admin-stock { min-width: 900px; }
+  .beverage-config-row.with-approx-yield { grid-template-columns: 1fr 1fr; }
+  .beverage-config-row.with-approx-yield > span,
+  .beverage-config-row.with-approx-yield > button { grid-column: 1 / -1; }
+}

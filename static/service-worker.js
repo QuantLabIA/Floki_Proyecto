@@ -1,4 +1,4 @@
-const FLOKI_SW_VERSION = 'floki-manager-v2-7-safe-stage-1';
+const FLOKI_SW_VERSION = 'floki-manager-v2-8-safe-stage-1';
 
 self.addEventListener('install', () => self.skipWaiting());
 

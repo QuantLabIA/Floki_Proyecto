@@ -1,4 +1,9 @@
-# Floki Manager v2.6 · Offline First
+# Floki Manager v2.8 · Stock y dashboard simplificado
+
+Esta versión parte de la base estable v2.7 y simplifica el trabajo diario: agrega una planilla oficial de stock descargable/reimportable, un conteo más claro, rendimiento aproximado configurable por bebida y un dashboard administrativo más directo.
+
+> El modo Offline Seguro Etapa 1 se conserva: no cachea páginas ni dashboards y solo prepara operaciones locales después de que la interfaz ya cargó.
+
 
 Esta versión mantiene PostgreSQL, Railway, la PWA instalable y los banners dinámicos de eventos, y agrega una **cola local de operaciones** para continuar trabajando durante cortes temporales de internet.
 
