@@ -67,7 +67,7 @@ DATA_DIR = BASE_DIR / "data"
 BACKUP_DIR = BASE_DIR / "backups"
 DATABASE = DATA_DIR / "floki.db"
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
-APP_VERSION = "2.8.1"
+APP_VERSION = "2.8.2"
 
 PAYMENT_METHODS = {"cash", "mercadopago", "transfer", "debit", "credit", "other"}
 # Las categorías advance/vip se conservan únicamente para leer eventos históricos.
@@ -75,15 +75,21 @@ SALE_CATEGORIES = {"general", "drink", "drink_special", "rrpp_benefit", "birthda
 ENTRY_CATEGORIES = {"general", "free"}
 HISTORICAL_ENTRY_CATEGORIES = {"general", "advance", "vip", "free"}
 PRICE_STEP = 1000
+BEVERAGE_PRICE_STEP = 500
 BIRTHDAY_MAX_FRIENDS = 9
 BIRTHDAY_MAX_PEOPLE = 10
 BIRTHDAY_GIFT_MIN_CHECKINS = 5
 PRICE_OPTIONS = tuple(range(0, 301000, PRICE_STEP))
+BEVERAGE_PRICE_OPTIONS = tuple(range(0, 301000, BEVERAGE_PRICE_STEP))
 ALLOWED_LIST_EXTENSIONS = {".csv", ".txt", ".xlsx", ".docx"}
 CASHIER_SECTORS = {"ticketing", "beverages"}
 SECTOR_LABELS = {"ticketing": "Caja de boletería", "beverages": "Caja de bebidas", "all": "Administración"}
 
-# Opciones cerradas para reducir errores al crear variantes de bebidas.
+# Categorías visibles del sector Bebidas. Las variantes existentes se agrupan
+# automáticamente sin perder su marca, nombre ni historial.
+BEVERAGE_CATEGORY_OPTIONS = (
+    "CERVEZAS", "FERNET", "VODKA", "WHISKY", "TRAGOS", "GASEOSAS", "SHOTS", "CHAMPAGNE",
+)
 BEVERAGE_TYPE_OPTIONS = (
     "Cerveza", "Fernet", "Vodka", "Gin", "Whisky", "Ron", "Gancia",
     "Tequila", "Aperitivo", "Licor", "Vino", "Espumante", "Energizante",
@@ -279,10 +285,27 @@ def price_from_option(value, allow_zero=True):
     return amount
 
 
+def beverage_price_from_option(value, allow_zero=True):
+    amount = money_to_float(value)
+    if not allow_zero and amount <= 0:
+        raise ValueError("Seleccioná un precio de bebida mayor a cero")
+    if amount % BEVERAGE_PRICE_STEP != 0 or amount not in BEVERAGE_PRICE_OPTIONS:
+        raise ValueError(f"El precio de la bebida debe ir de $ {BEVERAGE_PRICE_STEP:,} en $ {BEVERAGE_PRICE_STEP:,}".replace(",", "."))
+    return amount
+
+
 def beverage_stock_consumption(product, quantity):
-    # El rendimiento real se calcula al cierre. Durante la venta solo se guardan
-    # las unidades entregadas al cliente.
-    return round(float(quantity), 4)
+    # quantity siempre representa lo que se entregó al cliente: 1 Fernet = 1 vaso,
+    # 1 cerveza en lata = 1 lata. El stock físico se expresa aparte (botella/lata/etc.).
+    approx_yield = float(product["approx_yield"] or 0)
+    if approx_yield <= 0:
+        approx_yield = suggested_approx_yield(
+            product["stock_unit"], product["sale_unit"],
+            product["beverage_type"], product["brand"], product["name"],
+        )
+    if approx_yield <= 0:
+        return 0.0
+    return round(float(quantity) / approx_yield, 4)
 
 
 def beverage_option(value, allowed, label):
@@ -298,22 +321,60 @@ def build_beverage_name(beverage_type, brand, presentation):
     return f"{base} · {presentation.title()}"[:80]
 
 
-def suggested_approx_yield(stock_unit, sale_unit):
-    """Referencia editable; nunca reemplaza el rendimiento real del cierre."""
+def infer_beverage_category(beverage_type=None, brand=None, sale_unit=None, name=None):
+    text = " ".join(str(value or "") for value in (beverage_type, brand, sale_unit, name)).casefold()
+    sale = str(sale_unit or "").casefold()
+    if "cerve" in text or any(token in text for token in ("quilmes", "brahma", "heineken", "stella", "corona", "budweiser", "patagonia", "miller", "imperial", "schneider")):
+        return "CERVEZAS"
+    # La presentación SHOT manda sobre la familia de alcohol: un shot de vodka va a SHOTS.
+    if sale == "shot" or " shot" in f" {text}" or any(token in text for token in ("tequila", "shot")):
+        return "SHOTS"
+    if "fernet" in text or any(token in text for token in ("branca", "1882", "vittone")):
+        return "FERNET"
+    if "vodka" in text or any(token in text for token in ("smirnoff", "absolut", "skyy", "sernova")):
+        return "VODKA"
+    if "whisky" in text or "whiskey" in text or any(token in text for token in ("johnnie", "chivas", "jack daniel", "jameson", "ballantine")):
+        return "WHISKY"
+    if any(token in text for token in ("champagne", "espumante", "chandon")):
+        return "CHAMPAGNE"
+    if any(token in text for token in ("gaseosa", "energizante", "agua", "coca-cola", "sprite", "fanta", "schweppes", "pepsi", "7up", "speed", "red bull", "monster", "villavicencio", "eco de los andes", "kin")):
+        return "GASEOSAS"
+    return "TRAGOS"
+
+
+def group_beverages(rows):
+    grouped = {label: [] for label in BEVERAGE_CATEGORY_OPTIONS}
+    for row in rows:
+        label = infer_beverage_category(row["beverage_type"], row["brand"], row["sale_unit"], row["name"])
+        grouped[label].append(row)
+    return [{"label": label, "items": grouped[label]} for label in BEVERAGE_CATEGORY_OPTIONS if grouped[label]]
+
+
+def suggested_approx_yield(stock_unit, sale_unit, beverage_type=None, brand=None, name=None):
+    """Rendimiento operativo automático por presentación; el real se calcula al cierre."""
     stock_key = str(stock_unit or "").casefold()
     sale_key = str(sale_unit or "").casefold()
+    category = infer_beverage_category(beverage_type, brand, sale_unit, name)
+
+    # Venta física 1 a 1: una lata vendida descuenta una lata; una botella, una botella.
     if stock_key in {"lata", "botella", "unidad"} and (sale_key.startswith(stock_key) or sale_key == "unidad"):
         return 1.0
+    if stock_key in {"caja", "pack", "barril", "bidón"}:
+        return 0.0
+
     if stock_key == "botella":
-        if sale_key == "shot":
+        if sale_key == "shot" or category == "SHOTS":
             return 20.0
         if sale_key == "copa":
             return 6.0
         if sale_key == "vaso chico":
             return 12.0
         if sale_key in {"vaso", "vaso grande 750 ml"}:
+            # En tragos mezclados la botella de destilado no equivale al vaso completo.
             return 8.0
-    return 0.0
+        if sale_key in {"jarra", "balde"}:
+            return 4.0
+    return 1.0 if stock_key == "unidad" else 0.0
 
 
 def normalize_guest_name(value):
@@ -876,10 +937,13 @@ def init_db():
             if not duplicate and desired_name != beverage["name"]:
                 db.execute("UPDATE beverage_products SET name=? WHERE id=?", (desired_name, beverage["id"]))
                 db.execute("UPDATE beverage_stock SET beverage_name=? WHERE beverage_id=?", (desired_name, beverage["id"]))
-            if float(beverage["approx_yield"] or 0) <= 0:
-                suggested = suggested_approx_yield(beverage["stock_unit"], sale_unit)
-                if suggested > 0:
-                    db.execute("UPDATE beverage_products SET approx_yield=? WHERE id=?", (suggested, beverage["id"]))
+            automatic_yield = suggested_approx_yield(beverage["stock_unit"], sale_unit, beverage["beverage_type"], beverage["brand"], beverage["name"])
+            db.execute("UPDATE beverage_products SET approx_yield=? WHERE id=?", (automatic_yield, beverage["id"]))
+            if automatic_yield > 0:
+                db.execute(
+                    "UPDATE movements SET stock_units=(quantity * 1.0) / ? WHERE beverage_product_id=? AND category IN ('drink','drink_special','rrpp_benefit','birthday_benefit','birthday_discount')",
+                    (automatic_yield, beverage["id"]),
+                )
 
         for inactive in db.execute("SELECT id, name FROM beverage_products WHERE active=0 ORDER BY id").fetchall():
             if "archivada #" not in (inactive["name"] or "").casefold():
@@ -1011,10 +1075,13 @@ def inject_helpers():
         "app_version": APP_VERSION,
         "price_options": PRICE_OPTIONS,
         "price_step": PRICE_STEP,
+        "beverage_price_options": BEVERAGE_PRICE_OPTIONS,
+        "beverage_price_step": BEVERAGE_PRICE_STEP,
         "promoter_public_url": promoter_public_url,
         "sector_labels": SECTOR_LABELS,
         "current_sector": current_sector(),
         "beverage_type_options": BEVERAGE_TYPE_OPTIONS,
+        "beverage_category_options": BEVERAGE_CATEGORY_OPTIONS,
         "beverage_brand_options": BEVERAGE_BRAND_OPTIONS,
         "beverage_presentation_options": BEVERAGE_PRESENTATION_OPTIONS,
         "beverage_stock_unit_options": BEVERAGE_STOCK_UNIT_OPTIONS,
@@ -1166,7 +1233,7 @@ def initialize_event_stock(db, cash_session_id, user_id):
 
 def event_stock_rows(cash_session_id):
     return get_db().execute(
-        """SELECT bs.*, bp.stock_unit, bp.sale_unit, bp.servings_per_stock_unit, bp.approx_yield,
+        """SELECT bs.*, bp.stock_unit, bp.sale_unit, bp.servings_per_stock_unit, bp.approx_yield, bp.beverage_type, bp.brand,
                   COALESCE(SUM(CASE WHEN m.voided=0 AND m.movement_type='sale' THEN m.quantity ELSE 0 END), 0) AS sold_quantity,
                   COALESCE(SUM(CASE WHEN m.voided=0 AND m.category='drink' THEN m.quantity ELSE 0 END), 0) AS regular_quantity,
                   COALESCE(SUM(CASE WHEN m.voided=0 AND m.category IN ('drink_special','birthday_discount') THEN m.quantity ELSE 0 END), 0) AS special_quantity,
@@ -1196,10 +1263,11 @@ def stock_view_rows(cash_session_id):
         item["consumed_stock"] = physical_consumed
         item["observed_yield"] = observed_yield
         item["yield_status"] = yield_status
-        approx_yield = float(item.get("approx_yield") or 0)
+        approx_yield = suggested_approx_yield(item["stock_unit"], item["sale_unit"], item.get("beverage_type"), item.get("brand"), item.get("beverage_name")) if not float(item.get("approx_yield") or 0) else float(item.get("approx_yield") or 0)
         item["approx_yield"] = approx_yield
+        item["category_group"] = infer_beverage_category(item.get("beverage_type"), item.get("brand"), item.get("sale_unit"), item.get("beverage_name"))
         item["approx_consumed"] = round(item["sold_quantity"] / approx_yield, 2) if approx_yield > 0 else None
-        item["expected_final"] = None
+        item["expected_final"] = round(initial - item["approx_consumed"], 2) if item["approx_consumed"] is not None else None
         item["difference"] = None
         rows.append(item)
     return rows
@@ -1311,6 +1379,7 @@ def dashboard():
     active_promoters = get_db().execute("SELECT * FROM promoters WHERE active=1 AND is_common=0 AND is_promo=0 ORDER BY name COLLATE NOCASE").fetchall() if show_entries else []
     entry_prices = active_entry_prices() if show_entries else []
     beverages = get_db().execute("SELECT * FROM beverage_products WHERE active=1 ORDER BY sort_order, name COLLATE NOCASE").fetchall() if show_beverages else []
+    beverage_groups = group_beverages(beverages) if show_beverages else []
     ticketing_products = get_db().execute("SELECT * FROM ticketing_products WHERE active=1 ORDER BY sort_order, name COLLATE NOCASE").fetchall() if show_entries else []
     birthday_promoters = []
     if cash and show_beverages:
@@ -1352,7 +1421,7 @@ def dashboard():
         expected_cash = occupancy_percent = guest_pending = stock_pending = 0
     return render_template(
         "dashboard.html", cash=cash, totals=totals, by_payment=by_payment, movements=movements,
-        expected_cash=expected_cash, promoters=active_promoters, entry_prices=entry_prices, beverages=beverages,
+        expected_cash=expected_cash, promoters=active_promoters, entry_prices=entry_prices, beverages=beverages, beverage_groups=beverage_groups,
         promoter_summary=promoter_summary, occupancy_percent=occupancy_percent, guest_pending=guest_pending,
         show_entries=show_entries, show_beverages=show_beverages, ticketing_products=ticketing_products, sector=sector, today=date.today().isoformat(), stock_pending=stock_pending,
         beverage_progress=beverage_progress, birthday_promoters=birthday_promoters,
@@ -1565,14 +1634,14 @@ def perform_quick_sale(db, cash, user, payload, *, created_at=None):
             description = f"{product['name']} · {sale_unit}"
         elif sale_kind == "special_beverage":
             category = "drink_special"
-            unit_price = price_from_option(payload.get("special_price"), allow_zero=False)
+            unit_price = beverage_price_from_option(payload.get("special_price"), allow_zero=False)
             comment = str(payload.get("comment", "")).strip()[:160]
             if len(comment) < 2:
                 raise ValueError("Escribí qué se vendió en el comentario")
             description = f"Bebida especial · {product['name']} · {sale_unit} · {comment}"
         elif sale_kind == "rrpp_benefit":
             category = "rrpp_benefit"
-            unit_price = price_from_option(payload.get("benefit_price"), allow_zero=False)
+            unit_price = beverage_price_from_option(payload.get("benefit_price"), allow_zero=False)
             description = f"BENEFICIO RRPP · {product['name']} · {sale_unit} · valor de referencia ${int(unit_price):,}".replace(",", ".")
             payment_method = "other"
         else:
@@ -2018,7 +2087,7 @@ def redeem_birthday_benefit(promoter_id):
                    unit_price, total, payment_method, created_at, created_by, promoter_id,
                    beverage_product_id, stock_units
                ) VALUES (?, 'sale', 'birthday_benefit', 'beverages', ?, ?, 0, 0, 'other', ?, ?, ?, ?, ?)""",
-            (cash["id"], description, qty, now_iso(), g.user["id"], promoter_id, product["id"], float(qty)),
+            (cash["id"], description, qty, now_iso(), g.user["id"], promoter_id, product["id"], beverage_stock_consumption(product, qty)),
         )
     db.execute(
         "INSERT INTO birthday_benefits(cash_session_id, promoter_id, redeemed_at, redeemed_by) VALUES (?, ?, ?, ?)",
@@ -2657,7 +2726,7 @@ def create_imported_beverage(db, item):
     ).fetchone()
     price = float(similar["price"]) if similar else 1000.0
     max_order = db.execute("SELECT COALESCE(MAX(sort_order), 0) FROM beverage_products").fetchone()[0]
-    approx_yield = suggested_approx_yield(item["stock_unit"], presentation)
+    approx_yield = suggested_approx_yield(item["stock_unit"], presentation, beverage_type, brand, name)
     cursor = db.execute(
         """INSERT INTO beverage_products(
                name, price, stock_unit, sale_unit, servings_per_stock_unit, approx_yield,
@@ -2746,7 +2815,9 @@ def stock():
         initialize_event_stock(db, cash["id"], g.user["id"])
         db.commit()
     rows = stock_view_rows(cash["id"])
-    return render_template("stock.html", cash=cash, stock_rows=rows, stock_admin_view=g.user["role"] == "admin")
+    stock_groups = [{"label": label, "items": [row for row in rows if row.get("category_group") == label]} for label in BEVERAGE_CATEGORY_OPTIONS]
+    stock_groups = [group for group in stock_groups if group["items"]]
+    return render_template("stock.html", cash=cash, stock_rows=rows, stock_groups=stock_groups, stock_admin_view=g.user["role"] == "admin")
 
 
 @app.post("/stock/update")
@@ -2992,11 +3063,13 @@ def settings():
         promoters = get_db().execute("SELECT * FROM promoters WHERE is_common=0 AND is_promo=0 ORDER BY active DESC, name COLLATE NOCASE").fetchall()
         entry_prices = get_db().execute("SELECT * FROM entry_prices WHERE active=1 AND category='general' ORDER BY category").fetchall()
         beverages = get_db().execute("SELECT * FROM beverage_products WHERE active=1 ORDER BY sort_order, name COLLATE NOCASE").fetchall()
+        beverage_groups = group_beverages(beverages)
         ticketing_products = get_db().execute("SELECT * FROM ticketing_products ORDER BY active DESC, sort_order, name COLLATE NOCASE").fetchall()
         backup_files = [] if is_postgres_url(app.config.get("DATABASE_URL")) else sorted(BACKUP_DIR.glob("floki_*.db"), key=lambda p: p.stat().st_mtime, reverse=True)[:5]
     else:
         users = promoters = entry_prices = beverages = ticketing_products = backup_files = []
-    return render_template("settings.html", users=users, promoters=promoters, entry_prices=entry_prices, beverages=beverages, ticketing_products=ticketing_products, backups=backup_files)
+        beverage_groups = []
+    return render_template("settings.html", users=users, promoters=promoters, entry_prices=entry_prices, beverages=beverages, beverage_groups=beverage_groups, ticketing_products=ticketing_products, backups=backup_files)
 
 
 @app.post("/settings/users")
@@ -3129,7 +3202,7 @@ def update_prices():
         for beverage in db.execute("SELECT * FROM beverage_products").fetchall():
             field = f"beverage_{beverage['id']}"
             if field in request.form:
-                price = price_from_option(request.form.get(field), allow_zero=False)
+                price = beverage_price_from_option(request.form.get(field), allow_zero=False)
                 stock_unit = beverage_option(request.form.get(f"stock_unit_{beverage['id']}", "unidad"), BEVERAGE_STOCK_UNIT_OPTIONS, "la unidad de stock")
                 sale_unit = beverage_option(request.form.get(f"sale_unit_{beverage['id']}", "unidad"), BEVERAGE_PRESENTATION_OPTIONS, "la presentación")
                 beverage_type = beverage["beverage_type"] or beverage["name"]
@@ -3138,10 +3211,7 @@ def update_prices():
                 duplicate = db.execute("SELECT id FROM beverage_products WHERE lower(name)=lower(?) AND id<>?", (updated_name, beverage["id"])).fetchone()
                 if duplicate:
                     raise ValueError(f"Ya existe la variante {updated_name}")
-                approx_raw = request.form.get(f"approx_yield_{beverage['id']}", "0")
-                approx_yield = non_negative_number(approx_raw or "0", "El rendimiento aproximado", maximum=100, allow_zero=True)
-                if approx_yield == 0:
-                    approx_yield = suggested_approx_yield(stock_unit, sale_unit)
+                approx_yield = suggested_approx_yield(stock_unit, sale_unit, beverage_type, brand, updated_name)
                 db.execute("UPDATE beverage_products SET name=?, price=?, stock_unit=?, sale_unit=?, presentation=?, servings_per_stock_unit=1, approx_yield=?, updated_at=? WHERE id=?", (updated_name, price, stock_unit, sale_unit, sale_unit, approx_yield, now_iso(), beverage["id"]))
                 db.execute("UPDATE beverage_stock SET beverage_name=? WHERE beverage_id=?", (updated_name, beverage["id"]))
         db.commit()
@@ -3169,11 +3239,8 @@ def create_beverage():
             brand = beverage_option(brand_choice, BEVERAGE_BRAND_OPTIONS, "la marca")
         presentation = beverage_option(request.form.get("presentation"), BEVERAGE_PRESENTATION_OPTIONS, "la presentación")
         stock_unit = beverage_option(request.form.get("stock_unit"), BEVERAGE_STOCK_UNIT_OPTIONS, "la unidad de stock")
-        price = price_from_option(request.form.get("price"), allow_zero=False)
-        approx_raw = request.form.get("approx_yield", "0")
-        approx_yield = non_negative_number(approx_raw or "0", "El rendimiento aproximado", maximum=100, allow_zero=True)
-        if approx_yield == 0:
-            approx_yield = suggested_approx_yield(stock_unit, presentation)
+        price = beverage_price_from_option(request.form.get("price"), allow_zero=False)
+        approx_yield = suggested_approx_yield(stock_unit, presentation, beverage_type, brand)
         sort_order = positive_int(request.form.get("sort_order", "100"), "El orden", maximum=10000, allow_zero=True)
         name = build_beverage_name(beverage_type, brand, presentation)
         db = get_db()

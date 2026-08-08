@@ -33,17 +33,20 @@
       </div>
 
       <div class="section-heading subsection-heading" id="bebidas"><div><p class="eyebrow">BEBIDAS</p><h2>Precios y catálogo de bebidas</h2><p class="muted compact-copy">Cada combinación de bebida, marca y presentación es un botón independiente con su propio precio. Así, por ejemplo, Cerveza Quilmes en lata y en vaso no se mezclan.</p></div></div>
-      <div class="beverage-settings-list beverage-config-list">
-        <div class="beverage-config-head with-approx-yield"><span>Variante</span><span>Precio</span><span>Stock</span><span>Presentación</span><span>Rend. aprox.</span><span>Acción</span></div>
-        {% for beverage in beverages %}
+      <div class="beverage-settings-list beverage-config-list grouped-beverage-settings">
+        <div class="beverage-config-head with-approx-yield"><span>Variante</span><span>Precio</span><span>Stock físico</span><span>Venta</span><span>Rendimiento automático</span><span>Acción</span></div>
+        {% for group in beverage_groups %}
+        <div class="beverage-category-heading"><strong>{{ group['label'] }}</strong><small>{{ group['items']|length }} variante{% if group['items']|length != 1 %}s{% endif %}</small></div>
+        {% for beverage in group['items'] %}
         <div class="beverage-setting-row beverage-config-row with-approx-yield">
-          <span><strong>{{ beverage['name'] }}</strong><small>{{ beverage['beverage_type'] }} · {{ beverage['brand'] }}</small></span>
-          <select name="beverage_{{ beverage['id'] }}">{% for price in price_options if price > 0 %}<option value="{{ price }}" {% if price == beverage['price'] %}selected{% endif %}>{{ price|money }}</option>{% endfor %}</select>
+          <span><strong>{{ beverage['name'] }}</strong><small>{{ beverage['brand'] }} · {{ beverage['sale_unit']|title }}</small></span>
+          <select name="beverage_{{ beverage['id'] }}">{% for price in beverage_price_options if price > 0 %}<option value="{{ price }}" {% if price == beverage['price'] %}selected{% endif %}>{{ price|money }}</option>{% endfor %}</select>
           <select name="stock_unit_{{ beverage['id'] }}">{% if beverage['stock_unit'] not in beverage_stock_unit_options %}<option value="{{ beverage['stock_unit'] }}" selected>{{ beverage['stock_unit']|title }}</option>{% endif %}{% for option in beverage_stock_unit_options %}<option value="{{ option }}" {% if option == beverage['stock_unit'] %}selected{% endif %}>{{ option|title }}</option>{% endfor %}</select>
           <select name="sale_unit_{{ beverage['id'] }}">{% if beverage['sale_unit'] not in beverage_presentation_options %}<option value="{{ beverage['sale_unit'] }}" selected>{{ beverage['sale_unit']|title }}</option>{% endif %}{% for option in beverage_presentation_options %}<option value="{{ option }}" {% if option == beverage['sale_unit'] %}selected{% endif %}>{{ option|title }}</option>{% endfor %}</select>
-          <select name="approx_yield_{{ beverage['id'] }}"><option value="0">Automático</option>{% for option in approx_yield_options if option > 0 %}<option value="{{ option }}" {% if option == beverage['approx_yield'] %}selected{% endif %}>≈ {{ option }}</option>{% endfor %}</select>
+          <span class="automatic-yield-pill">{% if beverage['approx_yield'] %}≈ {{ beverage['approx_yield'] }} {{ beverage['sale_unit'] }} / {{ beverage['stock_unit'] }}{% else %}Se calcula al guardar{% endif %}</span>
           <button class="tiny-danger" type="submit" formaction="{{ url_for('toggle_beverage', beverage_id=beverage['id']) }}" formmethod="post" data-confirm="¿Eliminar {{ beverage['name'] }} del catálogo activo? El historial anterior se conserva.">Eliminar</button>
         </div>
+        {% endfor %}
         {% else %}<p class="muted">Todavía no hay variantes de bebidas.</p>{% endfor %}
       </div>
       <div class="beverage-save-bar"><span><strong>Precios de bebidas</strong><small>Elegí el nuevo valor y guardá los cambios.</small></span><button class="primary-button" type="submit">Guardar precios de bebidas</button></div>
@@ -52,13 +55,13 @@
     <form action="{{ url_for('create_beverage') }}" method="post" class="add-beverage-form beverage-create-form catalog-beverage-form" data-beverage-builder>
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <div class="beverage-builder-preview"><span>Botón que se creará</span><strong data-beverage-preview>Cerveza · Vaso</strong></div>
-      <label>Tipo de bebida<select name="beverage_type" required data-beverage-type>{% for option in beverage_type_options %}<option value="{{ option }}">{{ option }}</option>{% endfor %}</select></label>
+      <label>Tipo de bebida<select name="beverage_type" required data-beverage-type>{% for option in beverage_type_options %}<option value="{{ option }}">{{ option }}</option>{% endfor %}</select><small>Floki la agrupa automáticamente en CERVEZAS, FERNET, VODKA, WHISKY, TRAGOS, GASEOSAS, SHOTS o CHAMPAGNE.</small></label>
       <label>Marca<select name="brand_choice" required data-beverage-brand>{% for option in beverage_brand_options %}<option value="{{ option }}">{{ option }}</option>{% endfor %}<option value="__custom__">Otra marca…</option></select></label>
       <label data-custom-brand-field hidden>Marca personalizada<input name="custom_brand" maxlength="40" placeholder="Ej.: Otra marca" data-custom-brand></label>
       <label>Presentación de venta<select name="presentation" required data-beverage-presentation>{% for option in beverage_presentation_options %}<option value="{{ option }}">{{ option|title }}</option>{% endfor %}</select></label>
       <label>Cómo se cuenta el stock<select name="stock_unit" required>{% for option in beverage_stock_unit_options %}<option value="{{ option }}">{{ option|title }}</option>{% endfor %}</select></label>
-      <label>Precio<select name="price">{% for price in price_options if price > 0 %}<option value="{{ price }}">{{ price|money }}</option>{% endfor %}</select></label>
-      <label>Rendimiento aproximado<select name="approx_yield"><option value="0">Automático según presentación</option>{% for option in approx_yield_options if option > 0 %}<option value="{{ option }}">≈ {{ option }} por {{ 'unidad de stock' }}</option>{% endfor %}</select><small>Es una referencia; el rendimiento real se calcula al cierre.</small></label>
+      <label>Precio<select name="price">{% for price in beverage_price_options if price > 0 %}<option value="{{ price }}">{{ price|money }}</option>{% endfor %}</select><small>Podés usar $4.500, $5.500, etc.</small></label>
+      <div class="automatic-yield-note"><strong>Rendimiento automático</strong><small>Floki lo calcula según la categoría, la presentación vendida y cómo contás el stock. No tenés que cargarlo manualmente.</small></div>
       <label>Orden<input type="number" name="sort_order" min="0" max="10000" value="100"></label>
       <button class="secondary-button" type="submit">Agregar variante</button>
     </form>

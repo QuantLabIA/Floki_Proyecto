@@ -22,7 +22,7 @@
 
 <section class="card stock-help-card simplified-stock-help">
   {% if stock_admin_view %}
-  <div><strong>Conteo simple</strong><p class="muted">Solo dejamos lo importante: cuánto había, cuánto se vendió, cuánto queda y una referencia de rendimiento. El rendimiento real se calcula recién con el conteo final.</p></div>
+  <div><strong>Stock físico + consumiciones</strong><p class="muted">Vendido cuenta lo entregado al cliente (por ejemplo, 1 Fernet = 1 vaso). Floki convierte automáticamente esas consumiciones a botellas/latas estimadas. El conteo final físico calcula el rendimiento real.</p></div>
   {% else %}
   <div><strong>Conteo del sector bebidas</strong><p class="muted">Cargá la cantidad inicial y final. Los totales vendidos y rendimientos quedan reservados al administrador.</p></div>
   {% endif %}
@@ -35,27 +35,33 @@
     <div class="stock-table simplified-admin-stock stock-head">
       <span>Bebida</span><span>Inicial</span><span>Vendido</span><span>Consumo aprox.</span><span>Final</span><span>Rendimiento</span>
     </div>
-    {% for row in stock_rows %}
+    {% for group in stock_groups %}
+    <div class="stock-category-heading"><strong>{{ group['label'] }}</strong></div>
+    {% for row in group['items'] %}
     <div class="stock-table simplified-admin-stock stock-row">
-      <strong>{{ row['beverage_name'] }}<small>venta: {{ row['sale_unit'] }} · stock: {{ row['stock_unit'] }}</small></strong>
+      <strong>{{ row['beverage_name'] }}<small>Se vende por {{ row['sale_unit'] }} · se cuenta en {{ row['stock_unit'] }}</small></strong>
       <input type="number" step="0.01" min="0" max="100000" name="initial_{{ row['id'] }}" value="{{ row['initial_quantity'] }}" inputmode="decimal">
       <b class="stock-counter">{{ row['sold_quantity'] }} <small>{{ row['sale_unit'] }}</small></b>
-      <span class="approx-consumption">{% if row['approx_consumed'] is none %}Sin estimar{% else %}≈ {{ row['approx_consumed'] }} {{ row['stock_unit'] }}{% endif %}<small>{% if row['approx_yield'] %}{{ row['approx_yield'] }} {{ row['sale_unit'] }} / {{ row['stock_unit'] }}{% endif %}</small></span>
+      <span class="approx-consumption">{% if row['approx_consumed'] is none %}Sin estimar{% else %}≈ {{ row['approx_consumed'] }} {{ row['stock_unit'] }} usados{% endif %}<small>{% if row['approx_yield'] %}Automático: {{ row['approx_yield'] }} {{ row['sale_unit'] }} / {{ row['stock_unit'] }}{% if row['expected_final'] is not none %} · quedarían ≈ {{ row['expected_final'] }} {{ row['stock_unit'] }}{% endif %}{% endif %}</small></span>
       <input type="number" step="0.01" min="0" max="100000" name="final_{{ row['id'] }}" value="{{ '' if row['final_quantity'] is none else row['final_quantity'] }}" placeholder="Conteo final" inputmode="decimal">
       <span class="yield-result">{% if row['observed_yield'] is none %}{{ row['yield_status'] }}{% else %}<strong>{{ row['observed_yield'] }}</strong><small>{{ row['sale_unit'] }} / {{ row['stock_unit'] }} real</small>{% endif %}</span>
     </div>
+    {% endfor %}
     {% else %}<p class="muted">No hay bebidas activas asignadas.</p>{% endfor %}
     {% else %}
     <div class="stock-table blind-stock stock-head"><span>Bebida / variante</span><span>Cantidad inicial</span><span>Cantidad final</span></div>
-    {% for row in stock_rows %}
+    {% for group in stock_groups %}
+    <div class="stock-category-heading"><strong>{{ group['label'] }}</strong></div>
+    {% for row in group['items'] %}
     <div class="stock-table blind-stock stock-row">
-      <strong>{{ row['beverage_name'] }}<small>Stock en {{ row['stock_unit'] }}</small></strong>
+      <strong>{{ row['beverage_name'] }}<small>Conteo físico en {{ row['stock_unit'] }}</small></strong>
       <input type="number" step="0.01" min="0" max="100000" name="initial_{{ row['id'] }}" value="{{ row['initial_quantity'] }}" inputmode="decimal">
       <input type="number" step="0.01" min="0" max="100000" name="final_{{ row['id'] }}" value="{{ '' if row['final_quantity'] is none else row['final_quantity'] }}" placeholder="Conteo final" inputmode="decimal">
     </div>
+    {% endfor %}
     {% else %}<p class="muted">No hay bebidas activas asignadas.</p>{% endfor %}
     {% endif %}
   </div>
-  <div class="stock-actions"><p class="muted">El rendimiento aproximado es solo orientativo. El rendimiento real usa lo vendido y el conteo físico de esta noche.</p><button class="primary-button" type="submit">Guardar conteo</button></div>
+  <div class="stock-actions"><p class="muted">El rendimiento estimado es automático. El rendimiento real se calcula con el stock inicial, el conteo final y las consumiciones registradas esa noche.</p><button class="primary-button" type="submit">Guardar conteo</button></div>
 </form>
 {% endblock %}
