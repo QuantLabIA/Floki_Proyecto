@@ -664,7 +664,7 @@ class MigrationTestCase(unittest.TestCase):
         connection = sqlite3.connect(self.db_path)
         connection.row_factory = sqlite3.Row
         main = connection.execute("SELECT * FROM movements WHERE beverage_product_id=? AND category='drink' ORDER BY id DESC LIMIT 1", (champagne_id,)).fetchone()
-        included = connection.execute("SELECT * FROM movements WHERE linked_movement_id=? AND category='champagne_speed'", (main['id'],)).fetchone()
+        included = connection.execute("SELECT * FROM movements WHERE category='champagne_speed' AND description LIKE ? ORDER BY id DESC LIMIT 1", (f"%combo #{main['id']}%",)).fetchone()
         self.assertEqual(main['quantity'], 2)
         self.assertEqual(main['total'], 41000)
         self.assertEqual(included['beverage_product_id'], speed_id)
@@ -675,7 +675,7 @@ class MigrationTestCase(unittest.TestCase):
 
         self.client.post(f"/movements/{main['id']}/void", data={'reason':'prueba','csrf_token':token}, follow_redirects=True)
         connection = sqlite3.connect(self.db_path)
-        rows = connection.execute("SELECT category,voided FROM movements WHERE id=? OR linked_movement_id=? ORDER BY id", (main['id'], main['id'])).fetchall()
+        rows = connection.execute("SELECT category,voided FROM movements WHERE id=? OR (category='champagne_speed' AND description LIKE ?) ORDER BY id", (main['id'], f"%combo #{main['id']}%")).fetchall()
         connection.close()
         self.assertEqual(rows, [('drink', 1), ('champagne_speed', 1)])
 

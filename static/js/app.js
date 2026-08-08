@@ -377,3 +377,62 @@ if (eventCreateForm) {
 }
 
 // v2.8.6: Caja de Bebidas puede revisar sus movimientos recientes sin totales acumulados.
+
+
+// v2.8.8 · Guardado de precios/configuración sin recargar la página.
+const ajaxPriceSettingsForm = document.querySelector('[data-ajax-price-settings]');
+if (ajaxPriceSettingsForm) {
+  const saveStatus = ajaxPriceSettingsForm.querySelector('[data-price-save-status]');
+  const saveButton = ajaxPriceSettingsForm.querySelector('[data-save-price-settings]');
+  let dirty = false;
+
+  const markDirty = () => {
+    dirty = true;
+    if (saveStatus) saveStatus.textContent = 'Cambios sin guardar';
+  };
+
+  ajaxPriceSettingsForm.querySelectorAll('select, input').forEach((field) => {
+    if (field.name !== 'csrf_token' && field.name !== 'return_section') {
+      field.addEventListener('change', markDirty);
+      field.addEventListener('input', markDirty);
+    }
+  });
+
+  ajaxPriceSettingsForm.addEventListener('submit', async (event) => {
+    // Los botones Eliminar usan formaction propio y deben seguir funcionando normal.
+    if (event.submitter && event.submitter.matches('.tiny-danger')) return;
+    event.preventDefault();
+    if (!saveButton) return;
+
+    const originalText = saveButton.textContent;
+    saveButton.disabled = true;
+    saveButton.textContent = 'Guardando…';
+    if (saveStatus) saveStatus.textContent = 'Guardando cambios…';
+
+    try {
+      const response = await fetch(ajaxPriceSettingsForm.action, {
+        method: 'POST',
+        body: new FormData(ajaxPriceSettingsForm),
+        credentials: 'same-origin',
+        headers: {
+          'X-Requested-With': 'XMLHttpRequest',
+          'Accept': 'application/json',
+        },
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.ok) throw new Error(data.message || 'No se pudieron guardar los cambios');
+      dirty = false;
+      if (saveStatus) saveStatus.textContent = '✓ Cambios guardados sin recargar la página';
+      saveButton.textContent = 'Guardado ✓';
+      setTimeout(() => {
+        saveButton.textContent = originalText;
+        if (saveStatus && !dirty) saveStatus.textContent = 'Podés seguir modificando y guardar todo junto.';
+      }, 1800);
+    } catch (error) {
+      if (saveStatus) saveStatus.textContent = error.message || 'Error al guardar';
+      saveButton.textContent = 'Reintentar guardado';
+    } finally {
+      saveButton.disabled = false;
+    }
+  });
+}

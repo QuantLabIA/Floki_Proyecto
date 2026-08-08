@@ -67,7 +67,7 @@ DATA_DIR = BASE_DIR / "data"
 BACKUP_DIR = BASE_DIR / "backups"
 DATABASE = DATA_DIR / "floki.db"
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
-APP_VERSION = "2.8.7"
+APP_VERSION = "2.8.8"
 
 PAYMENT_METHODS = {"cash", "mercadopago", "transfer", "debit", "credit", "other"}
 # Las categorías advance/vip se conservan únicamente para leer eventos históricos.
@@ -403,7 +403,14 @@ def find_speed_product(db):
 
 
 def add_champagne_speed_stock(db, cash, user, parent_movement_id, champagne_product, champagne_quantity, *, promoter_id=None, created_at=None):
-    """Cada unidad de Champagne incluye siempre 2 Speed y ambos descuentan stock."""
+    """Descuenta los 2 Speed incluidos por Champagne de forma compatible con PostgreSQL.
+
+    v2.8.8 evita depender de ``linked_movement_id`` al insertar el movimiento auxiliar.
+    Algunas instalaciones creadas en versiones anteriores podían tener una definición
+    distinta de esa columna y la venta de Champagne terminaba en error 500 aunque el
+    resto del sistema funcionara. La relación queda guardada también en la descripción
+    como ``combo #<movimiento>`` y la anulación reconoce ambos formatos.
+    """
     if not is_champagne_product(champagne_product):
         return None
     speed = find_speed_product(db)
@@ -411,17 +418,17 @@ def add_champagne_speed_stock(db, cash, user, parent_movement_id, champagne_prod
         raise ValueError("Para vender o entregar Champagne tenés que tener una variante activa de Speed en Bebidas")
     speed_quantity = int(champagne_quantity) * 2
     ensure_beverage_in_event_stock(db, cash["id"], speed, user["id"])
-    description = f"Incluido con Champagne · {speed_quantity} Speed ({2} por champagne)"
+    description = f"Incluido con Champagne · {speed_quantity} Speed (2 por champagne) · combo #{parent_movement_id}"
     cursor = db.execute(
         """INSERT INTO movements(
                cash_session_id, movement_type, category, sector, description, quantity,
                unit_price, total, payment_method, created_at, created_by, promoter_id,
-               beverage_product_id, stock_units, linked_movement_id
-           ) VALUES (?, 'sale', 'champagne_speed', 'beverages', ?, ?, 0, 0, 'other', ?, ?, ?, ?, ?, ?)""",
+               beverage_product_id, stock_units
+           ) VALUES (?, 'sale', 'champagne_speed', 'beverages', ?, ?, 0, 0, 'other', ?, ?, ?, ?, ?)""",
         (
             cash["id"], description, speed_quantity,
             created_at or now_iso(), user["id"], promoter_id, speed["id"],
-            beverage_stock_consumption(speed, speed_quantity), parent_movement_id,
+            beverage_stock_consumption(speed, speed_quantity),
         ),
     )
     return cursor.lastrowid
@@ -1802,13 +1809,21 @@ def register_quick_sale():
     if not cash:
         flash("Primero tenés que abrir una caja.", "error")
         return redirect(url_for("dashboard"))
+    db = get_db()
     try:
-        result = perform_quick_sale(get_db(), cash, g.user, request.form)
-        get_db().commit()
+        result = perform_quick_sale(db, cash, g.user, request.form)
+        db.commit()
     except PermissionError:
+        db.rollback()
         abort(403)
     except (ValueError, TypeError) as exc:
+        db.rollback()
         flash(f"No se pudo registrar la venta: {exc}", "error")
+        return redirect(url_for("dashboard"))
+    except Exception:
+        db.rollback()
+        app.logger.exception("Error registrando venta rápida; la operación fue revertida")
+        flash("No se pudo registrar la venta. No se guardó ningún cobro ni descuento de stock. Probá nuevamente.", "error")
         return redirect(url_for("dashboard"))
     flash(result["message"], "success")
     return redirect(url_for("dashboard"))
@@ -1853,7 +1868,7 @@ def void_movement(movement_id):
     movement = db.execute("SELECT * FROM movements WHERE id=?", (movement_id,)).fetchone()
     if not movement or movement["voided"]:
         abort(404)
-    if movement["category"] == "champagne_speed" and movement["linked_movement_id"]:
+    if movement["category"] == "champagne_speed":
         flash("El Speed incluido se anula junto con la venta de Champagne original.", "error")
         return redirect(request.referrer or url_for("dashboard"))
     voided_at = now_iso()
@@ -1862,8 +1877,16 @@ def void_movement(movement_id):
         (voided_at, g.user["id"], reason, movement_id),
     )
     db.execute(
-        "UPDATE movements SET voided=1, voided_at=?, voided_by=?, void_reason=? WHERE linked_movement_id=? AND voided=0",
-        (voided_at, g.user["id"], f"Anulado junto con movimiento #{movement_id}: {reason}"[:180], movement_id),
+        """UPDATE movements
+           SET voided=1, voided_at=?, voided_by=?, void_reason=?
+           WHERE voided=0 AND (
+             linked_movement_id=?
+             OR (category='champagne_speed' AND description LIKE ?)
+           )""",
+        (
+            voided_at, g.user["id"], f"Anulado junto con movimiento #{movement_id}: {reason}"[:180],
+            movement_id, f"%combo #{movement_id}%",
+        ),
     )
     # Si era un ingreso por lista, liberar el nombre para que pueda corregirse y volver a registrarse.
     db.execute("DELETE FROM guest_checkins WHERE movement_id=?", (movement_id,))
@@ -3329,9 +3352,14 @@ def update_prices():
                 db.execute("UPDATE beverage_products SET name=?, price=?, stock_unit=?, sale_unit=?, presentation=?, servings_per_stock_unit=1, approx_yield=?, updated_at=? WHERE id=?", (updated_name, price, stock_unit, sale_unit, sale_unit, approx_yield, now_iso(), beverage["id"]))
                 db.execute("UPDATE beverage_stock SET beverage_name=? WHERE beverage_id=?", (updated_name, beverage["id"]))
         db.commit()
-        flash("Precio de entrada general, guardarropa y variantes de bebidas actualizados.", "success")
+        message = "Precio de entrada general, guardarropa y variantes de bebidas actualizados."
+        if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+            return jsonify({"ok": True, "message": message, "version": APP_VERSION})
+        flash(message, "success")
     except ValueError as exc:
         db.rollback()
+        if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+            return jsonify({"ok": False, "message": str(exc)}), 400
         flash(str(exc), "error")
     target = url_for("settings")
     if request.form.get("return_section") == "beverages":
@@ -3688,6 +3716,8 @@ def diagnostic():
         "promoters": ("SELECT COUNT(*) AS total FROM promoters WHERE active=1", ()),
         "beverages": ("SELECT COUNT(*) AS total FROM beverage_products WHERE active=1", ()),
         "ticketing_products": ("SELECT COUNT(*) AS total FROM ticketing_products WHERE active=1", ()),
+        "speed_active": ("SELECT COUNT(*) AS total FROM beverage_products WHERE active=1 AND (lower(brand)='speed' OR lower(name) LIKE '%speed%')", ()),
+        "movement_bundle_columns": ("SELECT COUNT(*) AS total FROM movements WHERE category='champagne_speed'", ()),
     }
     ok = True
     for name, (sql, params) in probes.items():
@@ -3703,8 +3733,8 @@ def diagnostic():
         "database": "postgresql" if db.is_postgres else "sqlite",
         "user": {"id": g.user["id"], "username": g.user["username"], "role": g.user["role"], "sector": g.user["sector"]},
         "checks": checks,
-        "offline_safe_stage": 1,
-        "offline_temporarily_disabled": False,
+        "offline_safe_stage": 0,
+        "offline_temporarily_disabled": True,
     }), (200 if ok else 500)
 
 

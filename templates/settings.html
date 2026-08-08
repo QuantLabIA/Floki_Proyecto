@@ -7,7 +7,7 @@
   {% if g.user['role'] == 'admin' %}
   <article class="card wide-card" id="precios">
     <div class="section-heading"><div><p class="eyebrow">PRECIOS DE ENTRADAS</p><h2>Antes y después del horario</h2><p class="muted compact-copy">La caja elige automáticamente el precio de la entrada general. FREE se confirma exclusivamente desde las listas; VIP y anticipada fueron eliminadas.</p></div></div>
-    <form action="{{ url_for('update_prices') }}" method="post" class="stack-form">
+    <form action="{{ url_for('update_prices') }}" method="post" class="stack-form" data-ajax-price-settings>
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <input type="hidden" name="return_section" value="beverages">
       <div class="pricing-table">
@@ -49,7 +49,7 @@
         {% endfor %}
         {% else %}<p class="muted">Todavía no hay variantes de bebidas.</p>{% endfor %}
       </div>
-      <div class="beverage-save-bar"><span><strong>Precios de bebidas</strong><small>Elegí el nuevo valor y guardá los cambios.</small></span><button class="primary-button" type="submit">Guardar precios de bebidas</button></div>
+      <div class="beverage-save-bar"><span><strong>Precios y configuración de bebidas</strong><small data-price-save-status>Podés modificar varias bebidas y guardar todo junto.</small></span><button class="primary-button" type="submit" data-save-price-settings>Guardar todos los cambios</button></div>
     </form>
 
     <form action="{{ url_for('create_beverage') }}" method="post" class="add-beverage-form beverage-create-form catalog-beverage-form" data-beverage-builder>
