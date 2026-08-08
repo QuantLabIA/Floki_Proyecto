@@ -67,7 +67,7 @@ DATA_DIR = BASE_DIR / "data"
 BACKUP_DIR = BASE_DIR / "backups"
 DATABASE = DATA_DIR / "floki.db"
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
-APP_VERSION = "2.8.5"
+APP_VERSION = "2.8.6"
 
 PAYMENT_METHODS = {"cash", "mercadopago", "transfer", "debit", "credit", "other"}
 # Las categorías advance/vip se conservan únicamente para leer eventos históricos.
@@ -1457,8 +1457,17 @@ def dashboard():
             by_payment = []
             promoter_summary = promoter_totals(cash["id"])
         else:
-            # La caja de bebidas registra ventas, pero no ve conteos parciales ni actividad acumulada.
-            movements = []
+            # Caja de bebidas puede revisar sus últimos movimientos operativos,
+            # pero sigue sin acceder a totales acumulados, ganancias ni reportes completos.
+            beverage_activity_categories = {
+                "drink", "drink_special", "rrpp_benefit",
+                "birthday_benefit", "birthday_discount"
+            }
+            movements = [
+                row for row in all_movements
+                if row["sector"] == "beverages"
+                and row["category"] in beverage_activity_categories
+            ][:20]
             by_payment = []
             promoter_summary = []
         occupancy_percent = round((totals["people_count"] / cash["capacity"] * 100), 1) if cash["capacity"] else 0

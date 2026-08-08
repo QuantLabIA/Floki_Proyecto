@@ -375,3 +375,5 @@ if (eventCreateForm) {
   dateInput?.addEventListener('change', refreshEventCopy);
   refreshEventCopy();
 }
+
+// v2.8.6: Caja de Bebidas puede revisar sus movimientos recientes sin totales acumulados.

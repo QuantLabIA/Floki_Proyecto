@@ -1418,3 +1418,5 @@ body.app-page { min-height: 100vh !important; color: #f8f7fb !important; }
 .voucher-fixed-summary{display:flex;justify-content:space-between;gap:12px;align-items:center;padding:14px 16px;border:1px solid rgba(191,112,255,.28);border-radius:16px;background:rgba(126,52,190,.10)}
 .voucher-fixed-summary strong{color:#fff;font-size:1.05rem}.voucher-fixed-summary span{color:var(--muted,#aaa);font-size:.9rem}
 @media(max-width:640px){.voucher-fixed-summary{align-items:flex-start;flex-direction:column}}
+
+/* v2.8.6 · actividad reciente visible para Caja de Bebidas */

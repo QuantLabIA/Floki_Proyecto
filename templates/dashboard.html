@@ -188,7 +188,7 @@
 <section class="action-grid single-action"><a class="action-card list-action" href="{{ url_for('promoter_lists') }}"><span>⌕</span><strong>Confirmar entrada FREE</strong><small>Solo personas cargadas en listas</small></a></section>
 {% endif %}
 
-{% if g.user['role']=='admin' or sector=='ticketing' %}
+{% if g.user['role']=='admin' or sector in ['ticketing','beverages'] %}
 <section class="card">
   <div class="section-heading"><div><p class="eyebrow">ACTIVIDAD DEL SECTOR</p><h2>Últimos movimientos</h2></div>{% if g.user['role']=='admin' %}<a href="{{ url_for('session_detail', session_id=cash['id']) }}">Ver reporte completo</a>{% endif %}</div>
   <div class="movement-list">
@@ -196,7 +196,7 @@
       <div class="movement-row {% if movement['voided'] %}voided{% endif %}">
         <span class="movement-icon {{ movement['movement_type'] }}">{% if movement['movement_type']=='sale' %}+{% else %}−{% endif %}</span>
         <div class="movement-main"><strong>{% if movement['movement_type']=='expense' %}{{ movement['description'] }}{% elif movement['description'] %}{{ movement['description'] }} × {{ movement['quantity'] }}{% else %}{{ category_labels.get(movement['category'], movement['category']) }} × {{ movement['quantity'] }}{% endif %}</strong><small>{{ movement['created_at']|datetime_ar }} · {{ payment_labels[movement['payment_method']] }}{% if movement['promoter_name'] %} · RRPP {{ movement['promoter_name'] }}{% endif %}</small></div>
-        {% if g.user['role']=='admin' %}<strong class="movement-amount">{% if movement['movement_type']=='expense' %}−{% endif %}{{ movement['total']|money }}</strong>{% endif %}
+        {% if g.user['role']=='admin' or sector=='beverages' %}<strong class="movement-amount">{% if movement['movement_type']=='expense' %}−{% endif %}{{ movement['total']|money }}</strong>{% endif %}
         {% if g.user['role']=='admin' and not movement['voided'] %}<form action="{{ url_for('void_movement', movement_id=movement['id']) }}" method="post" data-confirm="¿Anular este movimiento?"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="reason" value="Anulado desde el panel"><button class="tiny-danger" type="submit">Anular</button></form>{% endif %}
       </div>
     {% endfor %}{% else %}<p class="muted">Todavía no hay movimientos en este sector.</p>{% endif %}
