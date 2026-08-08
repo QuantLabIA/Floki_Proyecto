@@ -67,7 +67,7 @@ DATA_DIR = BASE_DIR / "data"
 BACKUP_DIR = BASE_DIR / "backups"
 DATABASE = DATA_DIR / "floki.db"
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
-APP_VERSION = "2.8.4"
+APP_VERSION = "2.8.5"
 
 PAYMENT_METHODS = {"cash", "mercadopago", "transfer", "debit", "credit", "other"}
 # Las categorías advance/vip se conservan únicamente para leer eventos históricos.
@@ -1659,6 +1659,11 @@ def perform_quick_sale(db, cash, user, payload, *, created_at=None):
             raise PermissionError("Tu usuario no tiene acceso a esa operación")
 
     quantity = positive_int(payload.get("quantity", "1"), "La cantidad", maximum=100)
+    # El voucher RRPP es siempre una sola consumición y vale $0.
+    # Se fuerza en backend para que ni la interfaz ni una petición manual puedan
+    # registrar más de una unidad por voucher.
+    if sale_kind == "rrpp_benefit":
+        quantity = 1
     # Para agilizar Caja de Bebidas, toda venta paga de bebidas se registra
     # operativamente como efectivo. El Mercado Pago real se declara una sola
     # vez al cierre de la noche y no en cada consumición.
@@ -1710,8 +1715,8 @@ def perform_quick_sale(db, cash, user, payload, *, created_at=None):
             description = f"Bebida especial · {product['name']} · {sale_unit} · {comment}" + (" · incluye 2 Speed" if champagne_bundle else "")
         elif sale_kind == "rrpp_benefit":
             category = "rrpp_benefit"
-            unit_price = beverage_price_from_option(payload.get("benefit_price"), allow_zero=False)
-            description = (f"BENEFICIO RRPP · {product['name']} · {sale_unit} · valor de referencia ${int(unit_price):,}".replace(",", ".") + (" · incluye 2 Speed" if champagne_bundle else ""))
+            unit_price = 0.0
+            description = f"VOUCHER RRPP $0 · {product['name']} · 1 {sale_unit}" + (" · incluye 2 Speed" if champagne_bundle else "")
             payment_method = "other"
         else:
             if not birthday_discount_available(operation_dt):
@@ -1763,7 +1768,7 @@ def perform_quick_sale(db, cash, user, payload, *, created_at=None):
             created_at=operation_dt.isoformat(sep=" "),
         )
     messages = {
-        "rrpp_benefit": f"BENEFICIO RRPP registrado: {product['name']} × {quantity}. Se descontó del stock sin sumar recaudación.",
+        "rrpp_benefit": f"Voucher RRPP registrado: {product['name']} × 1. Valor $0; se descontó una consumición del stock.",
         "special_beverage": f"Bebida especial registrada y asignada al stock de {product['name']}.",
         "birthday_discount": f"50% OFF de cumpleaños aplicado: {product['name']} × {quantity}.",
     }
