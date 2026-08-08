@@ -53,7 +53,7 @@
 
 <section class="metric-grid admin-metrics statistics-after-actions">
   <article class="metric-card metric-sales"><i class="metric-icon">▣</i><span>Ventas</span><strong>{{ totals['sales']|money }}</strong><small>Bruto registrado</small></article>
-  <article class="metric-card metric-tickets"><i class="metric-icon">⌑</i><span>Tickets vendidos</span><strong>{{ totals['paid_count'] }}</strong><small>Entradas generales pagas</small></article>
+  <article class="metric-card metric-tickets"><i class="metric-icon">⌑</i><span>Tickets vendidos</span><strong>{{ totals['ticket_count'] }}</strong><small>{{ totals['paid_count'] }} entradas · {{ totals['paid_beverage_count'] }} bebidas</small></article>
   <article class="metric-card metric-people"><i class="metric-icon">♙</i><span>Ingresos</span><strong>{{ totals['people_count'] }}</strong><small>{{ totals['paid_count'] }} pagos · {{ totals['free_count'] }} free/lista</small></article>
   <article class="metric-card metric-cloakroom"><i class="metric-icon">⌁</i><span>Guardarropa</span><strong>{{ totals['cloakroom_count'] }}</strong><small>Prendas registradas</small></article>
 </section>

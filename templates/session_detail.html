@@ -72,7 +72,7 @@
     <div class="movement-row {% if movement['voided'] %}voided{% endif %}">
       <span class="movement-icon {{ movement['movement_type'] }}">{% if movement['movement_type']=='sale' %}+{% else %}−{% endif %}</span>
       <div class="movement-main">
-        <strong>{% if movement['movement_type']=='expense' %}{{ movement['description'] }}{% else %}{{ category_labels.get(movement['category'], movement['category']) }} × {{ movement['quantity'] }}{% endif %}</strong>
+        <strong>{% if movement['movement_type']=='expense' %}{{ movement['description'] }}{% elif movement['description'] %}{{ movement['description'] }} × {{ movement['quantity'] }}{% else %}{{ category_labels.get(movement['category'], movement['category']) }} × {{ movement['quantity'] }}{% endif %}</strong>
         <small>{{ movement['created_at']|datetime_ar }} · {{ payment_labels[movement['payment_method']] }} · {{ movement['user_name'] }}{% if movement['promoter_name'] %} · RRPP {{ movement['promoter_name'] }}{% endif %}{% if movement['voided'] %} · ANULADO: {{ movement['void_reason'] }}{% endif %}</small>
       </div>
       <strong class="movement-amount">{% if movement['movement_type']=='expense' %}−{% endif %}{{ movement['total']|money }}</strong>

@@ -67,7 +67,7 @@ DATA_DIR = BASE_DIR / "data"
 BACKUP_DIR = BASE_DIR / "backups"
 DATABASE = DATA_DIR / "floki.db"
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
-APP_VERSION = "2.8.8"
+APP_VERSION = "2.8.9"
 
 PAYMENT_METHODS = {"cash", "mercadopago", "transfer", "debit", "credit", "other"}
 # Las categorías advance/vip se conservan únicamente para leer eventos históricos.
@@ -1229,6 +1229,8 @@ def session_totals(cash_session_id):
             COALESCE(SUM(CASE WHEN movement_type='expense' AND payment_method='cash' AND voided=0 THEN total ELSE 0 END), 0) AS cash_expenses,
             COALESCE(SUM(CASE WHEN movement_type='sale' AND category='free' AND voided=0 THEN quantity ELSE 0 END), 0) AS free_count,
             COALESCE(SUM(CASE WHEN movement_type='sale' AND category IN ('general','advance','vip') AND voided=0 THEN quantity ELSE 0 END), 0) AS paid_count,
+            COALESCE(SUM(CASE WHEN movement_type='sale' AND category IN ('drink','drink_special','birthday_discount') AND voided=0 THEN quantity ELSE 0 END), 0) AS paid_beverage_count,
+            COALESCE(SUM(CASE WHEN movement_type='sale' AND category IN ('general','advance','vip','drink','drink_special','birthday_discount') AND voided=0 THEN quantity ELSE 0 END), 0) AS ticket_count,
             COALESCE(SUM(CASE WHEN movement_type='sale' AND category IN ('general','advance','vip','free') AND voided=0 THEN quantity ELSE 0 END), 0) AS people_count,
             COALESCE(SUM(CASE WHEN movement_type='sale' AND category IN ('drink','drink_special','rrpp_benefit','birthday_benefit','birthday_discount') AND voided=0 THEN quantity ELSE 0 END), 0) AS drink_count,
             COALESCE(SUM(CASE WHEN movement_type='sale' AND category='rrpp_benefit' AND voided=0 THEN quantity ELSE 0 END), 0) AS rrpp_benefit_count,
