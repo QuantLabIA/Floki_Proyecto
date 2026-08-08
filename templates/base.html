@@ -71,12 +71,16 @@
 
   {% if g.user %}
   {% set endpoint = request.endpoint or '' %}
-  <nav class="mobile-nav {% if g.user['role']=='admin' %}five-items{% else %}three-items{% endif %}" aria-label="Navegación móvil">
+  <nav class="mobile-nav {% if g.user['role']=='admin' %}six-items{% else %}four-items{% endif %}" aria-label="Navegación móvil">
     <a class="{% if endpoint=='dashboard' %}active{% endif %}" href="{{ url_for('dashboard') }}"><span>⌂</span><small>Caja</small></a>
     {% if g.user['role']=='admin' or current_sector=='ticketing' %}<a class="{% if endpoint in ['promoter_lists','promoter_qrs'] %}active{% endif %}" href="{{ url_for('promoter_lists') }}"><span>☆</span><small>Listas</small></a>{% endif %}
     {% if g.user['role']=='admin' or current_sector=='beverages' %}<a class="{% if endpoint=='stock' %}active{% endif %}" href="{{ url_for('stock') }}"><span>▦</span><small>Stock</small></a>{% endif %}
     {% if g.user['role']=='admin' %}<a class="{% if endpoint in ['history','session_detail'] %}active{% endif %}" href="{{ url_for('history') }}"><span>◷</span><small>Historial</small></a>{% endif %}
     <a class="{% if endpoint=='settings' %}active{% endif %}" href="{{ url_for('settings') }}"><span>⚙</span><small>{{ 'Ajustes' if g.user['role']=='admin' else 'Cuenta' }}</small></a>
+    <form action="{{ url_for('logout') }}" method="post" class="mobile-logout-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button type="submit" aria-label="Cerrar sesión"><span>↪</span><small>Salir</small></button>
+    </form>
   </nav>
   {% endif %}
 

@@ -1420,3 +1420,72 @@ body.app-page { min-height: 100vh !important; color: #f8f7fb !important; }
 @media(max-width:640px){.voucher-fixed-summary{align-items:flex-start;flex-direction:column}}
 
 /* v2.8.6 · actividad reciente visible para Caja de Bebidas */
+
+
+/* v2.8.7 · iPhone / PWA safe-area y salida siempre accesible */
+:root {
+  --floki-safe-top: env(safe-area-inset-top, 0px);
+  --floki-safe-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* En modo app de iPhone la Dynamic Island / barra de estado no debe cubrir Salir. */
+body.app-page .topbar {
+  padding-top: var(--floki-safe-top);
+}
+body.app-page .admin-quick-tabs {
+  top: calc(76px + var(--floki-safe-top));
+}
+
+.session-exit-card { scroll-margin-bottom: calc(110px + var(--floki-safe-bottom)); }
+.logout-button-safe { min-height: 48px; }
+.mobile-logout-form { margin: 0; min-width: 0; }
+.mobile-logout-form button {
+  width: 100%;
+  min-height: 49px;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 3px;
+  padding: 0;
+  border: 0;
+  border-radius: 11px;
+  color: #e7b7ff;
+  background: transparent;
+  cursor: pointer;
+}
+.mobile-logout-form button span { font-size: 1.05rem; line-height: 1; }
+.mobile-logout-form button small { font-size: .58rem; font-weight: 700; }
+.mobile-logout-form button:active { background: rgba(185,76,255,.12); }
+
+@media (max-width: 680px) {
+  body.app-page {
+    padding-bottom: calc(92px + var(--floki-safe-bottom));
+  }
+  body.app-page .topbar {
+    min-height: calc(64px + var(--floki-safe-top));
+  }
+  body.app-page .admin-quick-tabs {
+    top: calc(64px + var(--floki-safe-top));
+  }
+  body.app-page .page-shell {
+    padding-bottom: calc(132px + var(--floki-safe-bottom));
+  }
+  .mobile-nav {
+    padding-bottom: calc(8px + var(--floki-safe-bottom));
+  }
+  .mobile-nav.six-items { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  .mobile-nav.four-items { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .mobile-nav.six-items a small,
+  .mobile-nav.six-items .mobile-logout-form button small { font-size: .49rem; }
+  .mobile-nav.four-items a small,
+  .mobile-nav.four-items .mobile-logout-form button small { font-size: .56rem; }
+}
+
+/* iPhone angosto: mantenemos los 6 accesos sin que se monten entre sí. */
+@media (max-width: 390px) {
+  .mobile-nav.six-items { padding-left: 5px; padding-right: 5px; gap: 1px; }
+  .mobile-nav.six-items a,
+  .mobile-nav.six-items .mobile-logout-form button { min-height: 47px; padding-left: 1px; padding-right: 1px; }
+  .mobile-nav.six-items a span,
+  .mobile-nav.six-items .mobile-logout-form button span { font-size: .98rem; }
+}

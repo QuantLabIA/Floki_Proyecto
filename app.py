@@ -67,7 +67,7 @@ DATA_DIR = BASE_DIR / "data"
 BACKUP_DIR = BASE_DIR / "backups"
 DATABASE = DATA_DIR / "floki.db"
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
-APP_VERSION = "2.8.6"
+APP_VERSION = "2.8.7"
 
 PAYMENT_METHODS = {"cash", "mercadopago", "transfer", "debit", "credit", "other"}
 # Las categorías advance/vip se conservan únicamente para leer eventos históricos.

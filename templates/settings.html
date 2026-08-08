@@ -92,6 +92,14 @@
     <form action="{{ url_for('change_password') }}" method="post" class="stack-form"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><label>Contraseña actual<input type="password" name="current_password" required></label><label>Nueva contraseña<input type="password" name="new_password" minlength="6" required></label><button class="primary-button" type="submit">Actualizar contraseña</button></form>
   </article>
 
+  <article class="card session-exit-card">
+    <div class="section-heading"><div><p class="eyebrow">SESIÓN</p><h2>Salir de Floki Manager</h2><p class="muted compact-copy">Disponible también desde la barra inferior en iPhone y celulares.</p></div></div>
+    <form action="{{ url_for('logout') }}" method="post">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button class="secondary-button full logout-button-safe" type="submit">Cerrar sesión</button>
+    </form>
+  </article>
+
   {% if g.user['role'] == 'admin' %}<article class="card"><div class="section-heading"><div><p class="eyebrow">DATOS</p><h2>Respaldos SQLite</h2></div></div><p class="muted">Se crea uno automáticamente en cada cierre. También podés generarlo ahora.</p><form action="{{ url_for('manual_backup') }}" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="primary-button full" type="submit">Crear respaldo ahora</button></form><div class="backup-list">{% for backup in backups %}<small>{{ backup.name }}</small>{% else %}<small>Aún no hay respaldos.</small>{% endfor %}</div></article>{% endif %}
 </section>
 {% endblock %}
