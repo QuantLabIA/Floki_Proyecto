@@ -61,29 +61,19 @@ document.querySelectorAll('[data-quick-category]').forEach((button) => {
 updateSaleFields();
 
 setTimeout(() => document.querySelectorAll('.flash').forEach((element) => element.remove()), 4500);
-// v2.8: Service Worker seguro. No intercepta ni cachea HTML/dashboards.
-// Se registra solamente para mantener la instalación PWA y retirar cachés viejos.
+// v2.8.1: modo estable online. Offline First queda retirado de la versión operativa.
+// Desregistramos cualquier Service Worker anterior y limpiamos sólo cachés de Floki.
+// NO borramos IndexedDB para no perder posibles operaciones pendientes de pruebas anteriores.
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', async () => {
     try {
-      await navigator.serviceWorker.register('/service-worker.js', { scope: '/', updateViaCache: 'none' });
-    } catch (_) { /* La app online funciona aunque el navegador no permita Service Worker. */ }
-  }, { once: true });
-}
-
-// Offline Seguro Etapa 1: se carga DESPUÉS de que la interfaz ya renderizó.
-// Si este módulo falla, nunca debe impedir el uso normal online.
-if (document.documentElement.dataset.flokiAuthenticated === '1') {
-  window.addEventListener('load', () => {
-    window.setTimeout(() => {
-      if (document.querySelector('script[data-floki-offline-safe]')) return;
-      const script = document.createElement('script');
-      script.src = `/static/js/offline-sync.js?v=${encodeURIComponent(document.querySelector('.brand-copy small')?.textContent || '2.8.0')}`;
-      script.defer = true;
-      script.dataset.flokiOfflineSafe = '1';
-      script.onerror = () => console.warn('Floki Offline Seguro no pudo cargarse; la aplicación continúa online.');
-      document.body.appendChild(script);
-    }, 900);
+      const registrations = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(registrations.map((registration) => registration.unregister()));
+      if ('caches' in window) {
+        const keys = await caches.keys();
+        await Promise.all(keys.filter((key) => key.startsWith('floki-manager-')).map((key) => caches.delete(key)));
+      }
+    } catch (_) { /* Floki funciona 100% online sin Service Worker. */ }
   }, { once: true });
 }
 
