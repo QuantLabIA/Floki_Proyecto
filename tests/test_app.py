@@ -590,6 +590,47 @@ class MigrationTestCase(unittest.TestCase):
             app_module.app.config["DATABASE"] = original_db
             Path(db_path).unlink(missing_ok=True)
 
+    def test_champagne_always_includes_two_speed_and_voids_together(self):
+        token = self.login()
+        self.open_cash(token)
+        self.client.post('/settings/beverages', data={
+            'beverage_type':'Energizante','brand_choice':'Speed','presentation':'lata 250 ml',
+            'price':'3000','stock_unit':'lata','sort_order':'31','csrf_token':token
+        }, follow_redirects=True)
+        self.client.post('/settings/beverages', data={
+            'beverage_type':'Espumante','brand_choice':'Chandon','presentation':'botella 750 ml',
+            'price':'20500','stock_unit':'botella','sort_order':'80','csrf_token':token
+        }, follow_redirects=True)
+
+        connection = sqlite3.connect(self.db_path)
+        champagne_id = connection.execute("SELECT id FROM beverage_products WHERE active=1 AND brand='Chandon'").fetchone()[0]
+        speed_id = connection.execute("SELECT id FROM beverage_products WHERE active=1 AND brand='Speed'").fetchone()[0]
+        connection.close()
+
+        response = self.client.post('/movements/quick-sale', data={
+            'sale_kind':'beverage','beverage_id':champagne_id,'quantity':'2',
+            'payment_method':'cash','csrf_token':token
+        }, follow_redirects=True)
+        self.assertIn(b'4 Speed', response.data)
+
+        connection = sqlite3.connect(self.db_path)
+        connection.row_factory = sqlite3.Row
+        main = connection.execute("SELECT * FROM movements WHERE beverage_product_id=? AND category='drink' ORDER BY id DESC LIMIT 1", (champagne_id,)).fetchone()
+        included = connection.execute("SELECT * FROM movements WHERE linked_movement_id=? AND category='champagne_speed'", (main['id'],)).fetchone()
+        self.assertEqual(main['quantity'], 2)
+        self.assertEqual(main['total'], 41000)
+        self.assertEqual(included['beverage_product_id'], speed_id)
+        self.assertEqual(included['quantity'], 4)
+        self.assertEqual(included['stock_units'], 4)
+        self.assertEqual(included['total'], 0)
+        connection.close()
+
+        self.client.post(f"/movements/{main['id']}/void", data={'reason':'prueba','csrf_token':token}, follow_redirects=True)
+        connection = sqlite3.connect(self.db_path)
+        rows = connection.execute("SELECT category,voided FROM movements WHERE id=? OR linked_movement_id=? ORDER BY id", (main['id'], main['id'])).fetchall()
+        connection.close()
+        self.assertEqual(rows, [('drink', 1), ('champagne_speed', 1)])
+
 
 if __name__ == "__main__":
     unittest.main()

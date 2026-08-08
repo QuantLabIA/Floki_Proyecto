@@ -1,4 +1,4 @@
-const RETIRE_VERSION = 'floki-manager-v2-8-2-stable-online';
+const RETIRE_VERSION = 'floki-manager-v2-8-3-stable-online';
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', (event) => {
   event.waitUntil((async () => {

@@ -32,14 +32,14 @@
         {% endfor %}
       </div>
 
-      <div class="section-heading subsection-heading" id="bebidas"><div><p class="eyebrow">BEBIDAS</p><h2>Precios y catálogo de bebidas</h2><p class="muted compact-copy">Cada combinación de bebida, marca y presentación es un botón independiente con su propio precio. Así, por ejemplo, Cerveza Quilmes en lata y en vaso no se mezclan.</p></div></div>
+      <div class="section-heading subsection-heading" id="bebidas"><div><p class="eyebrow">BEBIDAS</p><h2>Precios y catálogo de bebidas</h2><p class="muted compact-copy">Cada combinación de bebida, marca y presentación es un botón independiente con su propio precio. Así, por ejemplo, Cerveza Quilmes en lata y en vaso no se mezclan. Todo Champagne incluye automáticamente 2 Speed por unidad.</p></div></div>
       <div class="beverage-settings-list beverage-config-list grouped-beverage-settings">
         <div class="beverage-config-head with-approx-yield"><span>Variante</span><span>Precio</span><span>Stock físico</span><span>Venta</span><span>Rendimiento automático</span><span>Acción</span></div>
         {% for group in beverage_groups %}
         <div class="beverage-category-heading"><strong>{{ group['label'] }}</strong><small>{{ group['items']|length }} variante{% if group['items']|length != 1 %}s{% endif %}</small></div>
         {% for beverage in group['items'] %}
         <div class="beverage-setting-row beverage-config-row with-approx-yield">
-          <span><strong>{{ beverage['name'] }}</strong><small>{{ beverage['brand'] }} · {{ beverage['sale_unit']|title }}</small></span>
+          <span><strong>{{ beverage['name'] }}</strong><small>{{ beverage['brand'] }} · {{ beverage['sale_unit']|title }}{% if group['label']=='CHAMPAGNE' %} · incluye 2 Speed{% endif %}</small></span>
           <select name="beverage_{{ beverage['id'] }}">{% for price in beverage_price_options if price > 0 %}<option value="{{ price }}" {% if price == beverage['price'] %}selected{% endif %}>{{ price|money }}</option>{% endfor %}</select>
           <select name="stock_unit_{{ beverage['id'] }}">{% if beverage['stock_unit'] not in beverage_stock_unit_options %}<option value="{{ beverage['stock_unit'] }}" selected>{{ beverage['stock_unit']|title }}</option>{% endif %}{% for option in beverage_stock_unit_options %}<option value="{{ option }}" {% if option == beverage['stock_unit'] %}selected{% endif %}>{{ option|title }}</option>{% endfor %}</select>
           <select name="sale_unit_{{ beverage['id'] }}">{% if beverage['sale_unit'] not in beverage_presentation_options %}<option value="{{ beverage['sale_unit'] }}" selected>{{ beverage['sale_unit']|title }}</option>{% endif %}{% for option in beverage_presentation_options %}<option value="{{ option }}" {% if option == beverage['sale_unit'] %}selected{% endif %}>{{ option|title }}</option>{% endfor %}</select>
