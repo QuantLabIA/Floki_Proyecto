@@ -32,6 +32,7 @@ SERIAL_ID_TABLES = {
     "beverage_products",
     "ticketing_products",
     "beverage_stock",
+    "beverage_stock_adjustments",
     "birthday_benefits",
     "birthday_events",
     "promoter_guests",

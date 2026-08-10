@@ -10,14 +10,14 @@
 </section>
 
 <section class="metric-grid">
-  <article class="metric-card"><span>Ventas</span><strong>{{ totals['sales']|money }}</strong><small>Bruto</small></article>
-  <article class="metric-card"><span>Gastos</span><strong>{{ totals['expenses']|money }}</strong><small>Salidas</small></article>
-  <article class="metric-card"><span>Ingresos</span><strong>{{ totals['people_count'] }}</strong><small>{{ totals['paid_count'] }} pagos · {{ totals['free_count'] }} free</small></article>
-  <article class="metric-card"><span>Resultado</span><strong>{{ (totals['sales'] - totals['expenses'])|money }}</strong><small>Ventas menos gastos</small></article>
+  <a class="metric-card metric-card-link" href="{{ url_for('session_detail', session_id=cash['id'], type='sale') }}#movimientos"><span>Ventas</span><strong>{{ totals['sales']|money }}</strong><small>Ver ventas →</small></a>
+  <a class="metric-card metric-card-link" href="{{ url_for('session_detail', session_id=cash['id'], type='expense') }}#movimientos"><span>Gastos</span><strong>{{ totals['expenses']|money }}</strong><small>Ver gastos →</small></a>
+  <a class="metric-card metric-card-link" href="{{ url_for('promoter_lists') }}"><span>Ingresos</span><strong>{{ totals['people_count'] }}</strong><small>{{ totals['paid_count'] }} pagos · {{ totals['free_count'] }} free →</small></a>
+  <a class="metric-card metric-card-link" href="#cierre-resumen"><span>Resultado</span><strong>{{ (totals['sales'] - totals['expenses'])|money }}</strong><small>Ver cierre →</small></a>
 </section>
 
 <section class="report-grid">
-  <article class="card">
+  <article class="card" id="cierre-resumen">
     <div class="section-heading"><div><p class="eyebrow">CIERRE</p><h2>Dinero declarado</h2></div></div>
     <div class="summary-lines">
       <div><span>Monto inicial</span><strong>{{ cash['opening_amount']|money }}</strong></div>
@@ -65,7 +65,7 @@
   </form>
 </section>
 
-<section class="card movements-card">
+<section class="card movements-card" id="movimientos">
   <div class="section-heading"><div><p class="eyebrow">AUDITORÍA</p><h2>Movimientos</h2></div><span class="muted">{{ movements|length }} registros</span></div>
   <div class="movement-list">
     {% for movement in movements %}

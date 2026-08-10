@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 from datetime import datetime, time
+from zoneinfo import ZoneInfo
+
+ARGENTINA_TZ = ZoneInfo("America/Argentina/Buenos_Aires")
 
 FREE_ENTRY_CUTOFF = time(3, 30)
 COMMON_FREE_CUTOFF = FREE_ENTRY_CUTOFF
@@ -14,7 +17,7 @@ BIRTHDAY_DISCOUNT_CUTOFF_LABEL = "03:00"
 
 def _night_window_available(cutoff: time, now_value: datetime | None = None) -> bool:
     """Evalúa una franja nocturna que comienza al mediodía y cruza medianoche."""
-    now_value = now_value or datetime.now()
+    now_value = now_value or datetime.now(ARGENTINA_TZ).replace(tzinfo=None)
     current_time = now_value.time().replace(second=0, microsecond=0)
     return current_time >= time(12, 0) or current_time < cutoff
 

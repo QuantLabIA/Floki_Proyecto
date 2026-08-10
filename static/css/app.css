@@ -1489,3 +1489,61 @@ body.app-page .admin-quick-tabs {
   .mobile-nav.six-items a span,
   .mobile-nav.six-items .mobile-logout-form button span { font-size: .98rem; }
 }
+
+/* v2.9.0 · Historial operativo de Caja de Bebidas */
+.beverage-history-heading { align-items: flex-end; }
+.beverage-history-filter-form { grid-template-columns: minmax(210px,1.5fr) minmax(150px,1fr) repeat(2,minmax(145px,1fr)) auto auto; }
+.beverage-history-card { overflow: hidden; }
+.beverage-history-row { grid-template-columns: auto minmax(0,1fr) auto; }
+.beverage-history-amount { display: grid; justify-items: end; gap: 4px; min-width: 110px; }
+.beverage-history-amount small { color: var(--muted); font-size: .66rem; letter-spacing: .08em; }
+.beverage-history-row.voided .beverage-history-amount small { color: #ff7e9b; }
+.history-pagination { display: flex; align-items: center; justify-content: center; gap: 14px; margin-top: 18px; }
+
+@media (max-width: 900px) {
+  .beverage-history-filter-form { grid-template-columns: 1fr 1fr; }
+}
+
+@media (max-width: 680px) {
+  .mobile-nav.five-items { grid-template-columns: repeat(5, minmax(0,1fr)); padding-left: 5px; padding-right: 5px; gap: 1px; }
+  .mobile-nav.five-items a,
+  .mobile-nav.five-items .mobile-logout-form button { min-height: 47px; padding-left: 1px; padding-right: 1px; }
+  .mobile-nav.five-items a small,
+  .mobile-nav.five-items .mobile-logout-form button small { font-size: .51rem; }
+  .beverage-history-heading { align-items: stretch; }
+  .beverage-history-filter-form { grid-template-columns: 1fr; }
+  .beverage-history-row { grid-template-columns: auto minmax(0,1fr); }
+  .beverage-history-amount { grid-column: 2; justify-items: start; min-width: 0; }
+}
+
+/* v2.9.2 · paneles navegables + gastos visibles */
+.metric-card-link {
+  display: block;
+  text-decoration: none;
+  color: inherit;
+  cursor: pointer;
+}
+.metric-card-link:focus-visible {
+  outline: 2px solid var(--primary, #b94cff);
+  outline-offset: 3px;
+}
+.metric-card-link small { transition: opacity .18s ease; }
+.metric-card-link:hover small { opacity: 1; }
+.expense-entry-panel { scroll-margin-top: 96px; }
+.expense-quick-form {
+  display: grid;
+  grid-template-columns: minmax(220px, 2fr) minmax(130px, .8fr) minmax(160px, 1fr) auto;
+  gap: 12px;
+  align-items: end;
+}
+.expense-quick-form label { margin: 0; }
+.expense-submit { min-height: 46px; white-space: nowrap; }
+@media (max-width: 820px) {
+  .expense-quick-form { grid-template-columns: 1fr 1fr; }
+  .expense-quick-form label:first-of-type { grid-column: 1 / -1; }
+  .expense-submit { width: 100%; }
+}
+@media (max-width: 560px) {
+  .expense-quick-form { grid-template-columns: 1fr; }
+  .expense-quick-form label:first-of-type { grid-column: auto; }
+}

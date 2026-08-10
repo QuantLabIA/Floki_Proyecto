@@ -664,20 +664,44 @@ class MigrationTestCase(unittest.TestCase):
         connection = sqlite3.connect(self.db_path)
         connection.row_factory = sqlite3.Row
         main = connection.execute("SELECT * FROM movements WHERE beverage_product_id=? AND category='drink' ORDER BY id DESC LIMIT 1", (champagne_id,)).fetchone()
-        included = connection.execute("SELECT * FROM movements WHERE category='champagne_speed' AND description LIKE ? ORDER BY id DESC LIMIT 1", (f"%combo #{main['id']}%",)).fetchone()
+        included = connection.execute("SELECT * FROM beverage_stock_adjustments WHERE parent_movement_id=? AND reason='champagne_speed'", (main['id'],)).fetchone()
         self.assertEqual(main['quantity'], 2)
         self.assertEqual(main['total'], 41000)
         self.assertEqual(included['beverage_product_id'], speed_id)
         self.assertEqual(included['quantity'], 4)
         self.assertEqual(included['stock_units'], 4)
-        self.assertEqual(included['total'], 0)
+        # El acompañamiento no debe aparecer como una segunda venta monetaria.
+        self.assertEqual(connection.execute("SELECT COUNT(*) FROM movements WHERE category='champagne_speed' AND cash_session_id=?", (main['cash_session_id'],)).fetchone()[0], 0)
         connection.close()
 
         self.client.post(f"/movements/{main['id']}/void", data={'reason':'prueba','csrf_token':token}, follow_redirects=True)
         connection = sqlite3.connect(self.db_path)
-        rows = connection.execute("SELECT category,voided FROM movements WHERE id=? OR (category='champagne_speed' AND description LIKE ?) ORDER BY id", (main['id'], f"%combo #{main['id']}%")).fetchall()
+        main_voided = connection.execute("SELECT voided FROM movements WHERE id=?", (main['id'],)).fetchone()[0]
+        included_voided = connection.execute("SELECT voided FROM beverage_stock_adjustments WHERE parent_movement_id=?", (main['id'],)).fetchone()[0]
         connection.close()
-        self.assertEqual(rows, [('drink', 1), ('champagne_speed', 1)])
+        self.assertEqual(main_voided, 1)
+        self.assertEqual(included_voided, 1)
+
+    def test_beverage_cashier_can_open_full_beverage_history_but_ticketing_cannot(self):
+        admin_token = self.login()
+        self.open_cash(admin_token)
+        connection = sqlite3.connect(self.db_path)
+        beverage_id = connection.execute("SELECT id FROM beverage_products WHERE active=1 ORDER BY id LIMIT 1").fetchone()[0]
+        connection.close()
+        self.client.post('/movements/quick-sale', data={
+            'sale_kind':'beverage','beverage_id':beverage_id,'quantity':'1','payment_method':'cash','csrf_token':admin_token
+        }, follow_redirects=True)
+        self.client.post('/logout', data={'csrf_token':admin_token})
+
+        beverage_token = self.login('bebidas','floki123')
+        page = self.client.get('/beverages/history')
+        self.assertEqual(page.status_code, 200)
+        self.assertIn(b'Historial de ventas de bebidas', page.data)
+        self.assertIn(b'movimientos', page.data)
+        self.client.post('/logout', data={'csrf_token':beverage_token})
+
+        self.login('cajero','floki123')
+        self.assertEqual(self.client.get('/beverages/history').status_code, 403)
 
 
 if __name__ == "__main__":

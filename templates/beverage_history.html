@@ -1,0 +1,75 @@
+{% extends 'base.html' %}
+{% block title %}Historial de bebidas · Floki Manager{% endblock %}
+{% block content %}
+<section class="page-heading beverage-history-heading">
+  <div>
+    <p class="eyebrow">CAJA DE BEBIDAS</p>
+    <h1>Historial de ventas de bebidas</h1>
+    <p class="muted">Todas las operaciones del sector Bebidas, incluyendo eventos anteriores. Los 2 Speed incluidos con Champagne se descuentan del stock pero no aparecen como una venta extra.</p>
+  </div>
+  <a class="secondary-button" href="{{ url_for('dashboard') }}">Volver a Caja</a>
+</section>
+
+<section class="card beverage-history-filters">
+  <form method="get" class="filter-form beverage-history-filter-form">
+    <label>Evento
+      <select name="event">
+        <option value="">Todos los eventos</option>
+        {% for event in events %}
+          <option value="{{ event['id'] }}" {% if filters['event']==event['id']|string %}selected{% endif %}>{{ event['event_date']|date_ar }} · {{ event['event_name'] }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Tipo
+      <select name="kind">
+        <option value="all" {% if filters['kind']=='all' %}selected{% endif %}>Todas</option>
+        <option value="paid" {% if filters['kind']=='paid' %}selected{% endif %}>Ventas pagas</option>
+        <option value="benefit" {% if filters['kind']=='benefit' %}selected{% endif %}>Beneficios $0</option>
+        <option value="voided" {% if filters['kind']=='voided' %}selected{% endif %}>Anuladas</option>
+      </select>
+    </label>
+    <label>Desde<input type="date" name="date_from" value="{{ filters['date_from'] }}"></label>
+    <label>Hasta<input type="date" name="date_to" value="{{ filters['date_to'] }}"></label>
+    <button class="primary-button" type="submit">Filtrar</button>
+    <a class="secondary-button" href="{{ url_for('beverage_history') }}">Limpiar</a>
+  </form>
+</section>
+
+<section class="card beverage-history-card">
+  <div class="section-heading">
+    <div><p class="eyebrow">AUDITORÍA DE BEBIDAS</p><h2>{{ total_records }} movimientos</h2></div>
+    {% if total_pages > 1 %}<span class="muted">Página {{ page }} de {{ total_pages }}</span>{% endif %}
+  </div>
+  <div class="movement-list beverage-history-list">
+    {% if movements %}
+      {% for movement in movements %}
+      <div class="movement-row beverage-history-row {% if movement['voided'] %}voided{% endif %}">
+        <span class="movement-icon sale">+</span>
+        <div class="movement-main">
+          <strong>{{ movement['description'] or movement['beverage_name'] or category_labels.get(movement['category'], movement['category']) }} × {{ movement['quantity'] }}</strong>
+          <small>
+            {{ movement['event_date']|date_ar }} · {{ movement['event_name'] }} · {{ movement['created_at']|datetime_ar }}
+            · {{ movement['user_name'] }}
+            {% if movement['category']=='rrpp_benefit' %} · Voucher RRPP{% elif movement['category']=='birthday_benefit' %} · Beneficio cumpleaños{% elif movement['category']=='birthday_discount' %} · 50% cumpleaños{% endif %}
+          </small>
+        </div>
+        <div class="beverage-history-amount">
+          <strong>{{ movement['total']|money }}</strong>
+          <small>{% if movement['voided'] %}ANULADA{% elif movement['total']|float == 0 %}BENEFICIO{% else %}VENTA{% endif %}</small>
+        </div>
+      </div>
+      {% endfor %}
+    {% else %}
+      <p class="muted">No hay movimientos de bebidas con esos filtros.</p>
+    {% endif %}
+  </div>
+
+  {% if total_pages > 1 %}
+  <div class="history-pagination">
+    {% if page > 1 %}<a class="secondary-button" href="{{ url_for('beverage_history', event=filters['event'], kind=filters['kind'], date_from=filters['date_from'], date_to=filters['date_to'], page=page-1) }}">← Anterior</a>{% endif %}
+    <span class="muted">{{ page }} / {{ total_pages }}</span>
+    {% if page < total_pages %}<a class="secondary-button" href="{{ url_for('beverage_history', event=filters['event'], kind=filters['kind'], date_from=filters['date_from'], date_to=filters['date_to'], page=page+1) }}">Siguiente →</a>{% endif %}
+  </div>
+  {% endif %}
+</section>
+{% endblock %}

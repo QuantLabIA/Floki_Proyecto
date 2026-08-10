@@ -12,7 +12,8 @@ import zipfile
 
 import qrcode
 from contextlib import closing
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timezone
+from zoneinfo import ZoneInfo
 from functools import wraps
 from pathlib import Path
 from xml.etree import ElementTree as ET
@@ -67,7 +68,8 @@ DATA_DIR = BASE_DIR / "data"
 BACKUP_DIR = BASE_DIR / "backups"
 DATABASE = DATA_DIR / "floki.db"
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
-APP_VERSION = "2.8.9"
+APP_VERSION = "2.9.1"
+ARGENTINA_TZ = ZoneInfo("America/Argentina/Buenos_Aires")
 
 PAYMENT_METHODS = {"cash", "mercadopago", "transfer", "debit", "credit", "other"}
 # Las categorías advance/vip se conservan únicamente para leer eventos históricos.
@@ -194,8 +196,13 @@ def add_security_headers(response):
     return response
 
 
+def argentina_now():
+    """Hora oficial usada por Floki, independiente de la zona horaria de Railway."""
+    return datetime.now(ARGENTINA_TZ).replace(tzinfo=None, microsecond=0)
+
+
 def now_iso():
-    return datetime.now().replace(microsecond=0).isoformat(sep=" ")
+    return argentina_now().isoformat(sep=" ")
 
 
 def public_base_url():
@@ -343,15 +350,62 @@ def infer_beverage_category(beverage_type=None, brand=None, sale_unit=None, name
     return "TRAGOS"
 
 
-def group_beverages(rows):
-    """Agrupa por categoría fija y ordena automáticamente cada grupo por nombre."""
+def group_beverages(rows, *, product_ranking=None, category_ranking=None, sold_counts=None):
+    """Agrupa bebidas y permite priorizar lo más vendido del evento anterior."""
+    product_ranking = product_ranking or {}
+    category_ranking = category_ranking or {}
+    sold_counts = sold_counts or {}
     grouped = {label: [] for label in BEVERAGE_CATEGORY_OPTIONS}
     for row in rows:
-        label = infer_beverage_category(row["beverage_type"], row["brand"], row["sale_unit"], row["name"])
-        grouped[label].append(row)
+        item = dict(row)
+        label = infer_beverage_category(item.get("beverage_type"), item.get("brand"), item.get("sale_unit"), item.get("name"))
+        item["sold_count"] = int(sold_counts.get(item.get("id"), 0) or 0)
+        item["previous_sold_count"] = int(product_ranking.get(item.get("id"), 0) or 0)
+        grouped[label].append(item)
     for label in grouped:
-        grouped[label].sort(key=lambda row: str(row["name"] or "").casefold())
-    return [{"label": label, "items": grouped[label]} for label in BEVERAGE_CATEGORY_OPTIONS if grouped[label]]
+        grouped[label].sort(key=lambda row: (-int(row.get("previous_sold_count", 0)), str(row.get("name") or "").casefold()))
+    category_order = {label: index for index, label in enumerate(BEVERAGE_CATEGORY_OPTIONS)}
+    labels = [label for label in BEVERAGE_CATEGORY_OPTIONS if grouped[label]]
+    labels.sort(key=lambda label: (-int(category_ranking.get(label, 0)), category_order[label]))
+    return [{"label": label, "items": grouped[label], "previous_sold_count": int(category_ranking.get(label, 0) or 0)} for label in labels]
+
+
+def beverage_paid_sales_by_product(cash_session_id):
+    """Unidades pagas por producto; beneficios $0 no alteran el ranking."""
+    rows = get_db().execute(
+        """SELECT beverage_product_id, COALESCE(SUM(quantity), 0) AS sold
+           FROM movements
+           WHERE cash_session_id=? AND movement_type='sale' AND sector='beverages'
+             AND voided=0 AND beverage_product_id IS NOT NULL AND total>0
+             AND category NOT IN ('rrpp_benefit','birthday_benefit','champagne_speed')
+           GROUP BY beverage_product_id""",
+        (cash_session_id,),
+    ).fetchall()
+    return {int(row["beverage_product_id"]): int(row["sold"] or 0) for row in rows}
+
+
+def previous_event_beverage_ranking(current_cash_session_id):
+    previous = get_db().execute(
+        """SELECT id FROM cash_sessions
+           WHERE id<>? AND status='closed'
+           ORDER BY event_date DESC, id DESC LIMIT 1""",
+        (current_cash_session_id,),
+    ).fetchone()
+    if not previous:
+        return {}, {}
+    product_sales = beverage_paid_sales_by_product(previous["id"])
+    if not product_sales:
+        return {}, {}
+    placeholders = ",".join("?" for _ in product_sales)
+    products = get_db().execute(
+        f"SELECT id, beverage_type, brand, sale_unit, name FROM beverage_products WHERE id IN ({placeholders})",
+        tuple(product_sales.keys()),
+    ).fetchall()
+    category_sales = {}
+    for product in products:
+        label = infer_beverage_category(product["beverage_type"], product["brand"], product["sale_unit"], product["name"])
+        category_sales[label] = category_sales.get(label, 0) + product_sales.get(int(product["id"]), 0)
+    return product_sales, category_sales
 
 
 def suggested_approx_yield(stock_unit, sale_unit, beverage_type=None, brand=None, name=None):
@@ -403,32 +457,33 @@ def find_speed_product(db):
 
 
 def add_champagne_speed_stock(db, cash, user, parent_movement_id, champagne_product, champagne_quantity, *, promoter_id=None, created_at=None):
-    """Descuenta los 2 Speed incluidos por Champagne de forma compatible con PostgreSQL.
+    """Registra los 2 Speed por Champagne como ajuste de stock, no como otra venta.
 
-    v2.8.8 evita depender de ``linked_movement_id`` al insertar el movimiento auxiliar.
-    Algunas instalaciones creadas en versiones anteriores podían tener una definición
-    distinta de esa columna y la venta de Champagne terminaba en error 500 aunque el
-    resto del sistema funcionara. La relación queda guardada también en la descripción
-    como ``combo #<movimiento>`` y la anulación reconoce ambos formatos.
+    Desde v2.9.0 el acompañamiento de Champagne deja de insertarse en ``movements``.
+    Una venta de Champagne es un único ticket monetario y los 2 Speed son un componente
+    automático de stock. Esto evita que PostgreSQL tenga que crear un segundo movimiento
+    de venta y mantiene el historial de Caja de Bebidas limpio.
     """
     if not is_champagne_product(champagne_product):
         return None
     speed = find_speed_product(db)
     if not speed:
-        raise ValueError("Para vender o entregar Champagne tenés que tener una variante activa de Speed en Bebidas")
+        return None
     speed_quantity = int(champagne_quantity) * 2
+    if speed_quantity <= 0:
+        return None
     ensure_beverage_in_event_stock(db, cash["id"], speed, user["id"])
-    description = f"Incluido con Champagne · {speed_quantity} Speed (2 por champagne) · combo #{parent_movement_id}"
+    stock_units = beverage_stock_consumption(speed, speed_quantity)
+    # INSERT OR IGNORE hace la operación idempotente: si el navegador reenvía la misma
+    # venta por accidente, nunca duplica el descuento asociado al mismo movimiento padre.
     cursor = db.execute(
-        """INSERT INTO movements(
-               cash_session_id, movement_type, category, sector, description, quantity,
-               unit_price, total, payment_method, created_at, created_by, promoter_id,
-               beverage_product_id, stock_units
-           ) VALUES (?, 'sale', 'champagne_speed', 'beverages', ?, ?, 0, 0, 'other', ?, ?, ?, ?, ?)""",
+        """INSERT OR IGNORE INTO beverage_stock_adjustments(
+               cash_session_id, parent_movement_id, beverage_product_id, reason,
+               quantity, stock_units, created_at, created_by, voided
+           ) VALUES (?, ?, ?, 'champagne_speed', ?, ?, ?, ?, 0)""",
         (
-            cash["id"], description, speed_quantity,
-            created_at or now_iso(), user["id"], promoter_id, speed["id"],
-            beverage_stock_consumption(speed, speed_quantity),
+            cash["id"], parent_movement_id, speed["id"], speed_quantity, stock_units,
+            created_at or now_iso(), user["id"],
         ),
     )
     return cursor.lastrowid
@@ -911,6 +966,27 @@ def init_db():
                 FOREIGN KEY(linked_movement_id) REFERENCES movements(id)
             );
 
+            CREATE TABLE IF NOT EXISTS beverage_stock_adjustments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                cash_session_id INTEGER NOT NULL,
+                parent_movement_id INTEGER NOT NULL,
+                beverage_product_id INTEGER NOT NULL,
+                reason TEXT NOT NULL DEFAULT 'bundle',
+                quantity REAL NOT NULL DEFAULT 0,
+                stock_units REAL NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                created_by INTEGER NOT NULL,
+                voided INTEGER NOT NULL DEFAULT 0,
+                voided_at TEXT,
+                voided_by INTEGER,
+                FOREIGN KEY(cash_session_id) REFERENCES cash_sessions(id),
+                FOREIGN KEY(parent_movement_id) REFERENCES movements(id),
+                FOREIGN KEY(beverage_product_id) REFERENCES beverage_products(id),
+                FOREIGN KEY(created_by) REFERENCES users(id),
+                FOREIGN KEY(voided_by) REFERENCES users(id),
+                UNIQUE(parent_movement_id, beverage_product_id, reason)
+            );
+
             CREATE TABLE IF NOT EXISTS offline_operations (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 operation_id TEXT NOT NULL UNIQUE,
@@ -929,6 +1005,9 @@ def init_db():
 
             CREATE INDEX IF NOT EXISTS idx_movements_session ON movements(cash_session_id);
             CREATE INDEX IF NOT EXISTS idx_movements_created_at ON movements(created_at);
+            CREATE INDEX IF NOT EXISTS idx_beverage_stock_adjustments_session ON beverage_stock_adjustments(cash_session_id);
+            CREATE INDEX IF NOT EXISTS idx_beverage_stock_adjustments_parent ON beverage_stock_adjustments(parent_movement_id);
+            CREATE INDEX IF NOT EXISTS idx_beverage_stock_adjustments_product ON beverage_stock_adjustments(beverage_product_id);
             CREATE INDEX IF NOT EXISTS idx_promoter_guests_session ON promoter_guests(cash_session_id);
             CREATE INDEX IF NOT EXISTS idx_promoter_guests_normalized ON promoter_guests(cash_session_id, normalized_name);
             CREATE INDEX IF NOT EXISTS idx_guest_checkins_session ON guest_checkins(cash_session_id);
@@ -971,6 +1050,9 @@ def init_db():
         db.execute("CREATE INDEX IF NOT EXISTS idx_movements_promoter ON movements(promoter_id)")
         db.execute("CREATE INDEX IF NOT EXISTS idx_movements_beverage_product ON movements(beverage_product_id)")
         db.execute("CREATE INDEX IF NOT EXISTS idx_movements_linked ON movements(linked_movement_id)")
+        db.execute("CREATE INDEX IF NOT EXISTS idx_beverage_stock_adjustments_session ON beverage_stock_adjustments(cash_session_id)")
+        db.execute("CREATE INDEX IF NOT EXISTS idx_beverage_stock_adjustments_parent ON beverage_stock_adjustments(parent_movement_id)")
+        db.execute("CREATE INDEX IF NOT EXISTS idx_beverage_stock_adjustments_product ON beverage_stock_adjustments(beverage_product_id)")
         db.execute("CREATE INDEX IF NOT EXISTS idx_promoters_normalized ON promoters(normalized_name)")
         db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_promoters_qr_token ON promoters(qr_token) WHERE qr_token IS NOT NULL")
         db.execute("UPDATE cash_sessions SET event_date=date(opened_at) WHERE event_date IS NULL OR trim(event_date)='' ")
@@ -1114,6 +1196,18 @@ def ticketing_required(view):
     return wrapped_view
 
 
+def beverages_required(view):
+    @wraps(view)
+    def wrapped_view(**kwargs):
+        if g.user is None:
+            return redirect(url_for("login"))
+        if g.user["role"] != "admin" and g.user["sector"] != "beverages":
+            abort(403)
+        return view(**kwargs)
+
+    return wrapped_view
+
+
 def current_sector():
     if not g.user:
         return None
@@ -1170,7 +1264,10 @@ def datetime_filter(value):
     if not value:
         return "—"
     try:
-        return datetime.fromisoformat(value).strftime("%d/%m/%Y %H:%M")
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        if parsed.tzinfo is not None:
+            parsed = parsed.astimezone(ARGENTINA_TZ).replace(tzinfo=None)
+        return parsed.strftime("%d/%m/%Y %H:%M")
     except (TypeError, ValueError):
         return value
 
@@ -1195,7 +1292,7 @@ def active_entry_prices(now_value=None):
 
 
 def resolve_entry_price(row, now_value=None):
-    now_value = now_value or datetime.now()
+    now_value = now_value or argentina_now()
     try:
         hour, minute = [int(part) for part in row["cutoff_time"].split(":", 1)]
         cutoff = time(hour, minute)
@@ -1301,18 +1398,41 @@ def initialize_event_stock(db, cash_session_id, user_id):
 
 
 def event_stock_rows(cash_session_id):
+    """Stock del evento sumando ventas y ajustes automáticos de combos.
+
+    Los movimientos históricos ``champagne_speed`` siguen computando consumo para no
+    alterar jornadas anteriores. Desde v2.9.0 los nuevos 2 Speed incluidos se guardan
+    en ``beverage_stock_adjustments`` y no aparecen como una segunda venta.
+    """
     return get_db().execute(
         """SELECT bs.*, bp.stock_unit, bp.sale_unit, bp.servings_per_stock_unit, bp.approx_yield, bp.beverage_type, bp.brand,
-                  COALESCE(SUM(CASE WHEN m.voided=0 AND m.movement_type='sale' THEN m.quantity ELSE 0 END), 0) AS sold_quantity,
-                  COALESCE(SUM(CASE WHEN m.voided=0 AND m.category='drink' THEN m.quantity ELSE 0 END), 0) AS regular_quantity,
-                  COALESCE(SUM(CASE WHEN m.voided=0 AND m.category IN ('drink_special','birthday_discount') THEN m.quantity ELSE 0 END), 0) AS special_quantity,
-                  COALESCE(SUM(CASE WHEN m.voided=0 AND m.category IN ('rrpp_benefit','birthday_benefit') THEN m.quantity ELSE 0 END), 0) AS benefit_quantity,
-                  COALESCE(SUM(CASE WHEN m.voided=0 AND m.movement_type='sale' THEN m.stock_units ELSE 0 END), 0) AS consumed_stock
+                  COALESCE((SELECT SUM(m.quantity) FROM movements m
+                            WHERE m.cash_session_id=bs.cash_session_id AND m.beverage_product_id=bs.beverage_id
+                              AND m.voided=0 AND m.movement_type='sale' AND m.category<>'champagne_speed'), 0) AS sold_quantity,
+                  COALESCE((SELECT SUM(m.quantity) FROM movements m
+                            WHERE m.cash_session_id=bs.cash_session_id AND m.beverage_product_id=bs.beverage_id
+                              AND m.voided=0 AND m.category='drink'), 0) AS regular_quantity,
+                  COALESCE((SELECT SUM(m.quantity) FROM movements m
+                            WHERE m.cash_session_id=bs.cash_session_id AND m.beverage_product_id=bs.beverage_id
+                              AND m.voided=0 AND m.category IN ('drink_special','birthday_discount')), 0) AS special_quantity,
+                  COALESCE((SELECT SUM(m.quantity) FROM movements m
+                            WHERE m.cash_session_id=bs.cash_session_id AND m.beverage_product_id=bs.beverage_id
+                              AND m.voided=0 AND m.category IN ('rrpp_benefit','birthday_benefit')), 0) AS benefit_quantity,
+                  COALESCE((SELECT SUM(m.stock_units) FROM movements m
+                            WHERE m.cash_session_id=bs.cash_session_id AND m.beverage_product_id=bs.beverage_id
+                              AND m.voided=0 AND m.movement_type='sale'), 0)
+                  + COALESCE((SELECT SUM(a.stock_units) FROM beverage_stock_adjustments a
+                              WHERE a.cash_session_id=bs.cash_session_id AND a.beverage_product_id=bs.beverage_id
+                                AND a.voided=0), 0) AS consumed_stock,
+                  COALESCE((SELECT SUM(m.quantity) FROM movements m
+                            WHERE m.cash_session_id=bs.cash_session_id AND m.beverage_product_id=bs.beverage_id
+                              AND m.voided=0 AND m.category='champagne_speed'), 0)
+                  + COALESCE((SELECT SUM(a.quantity) FROM beverage_stock_adjustments a
+                              WHERE a.cash_session_id=bs.cash_session_id AND a.beverage_product_id=bs.beverage_id
+                                AND a.voided=0 AND a.reason='champagne_speed'), 0) AS bundle_quantity
            FROM beverage_stock bs
            JOIN beverage_products bp ON bp.id=bs.beverage_id
-           LEFT JOIN movements m ON m.cash_session_id=bs.cash_session_id AND m.beverage_product_id=bs.beverage_id
            WHERE bs.cash_session_id=? AND bp.active=1
-           GROUP BY bs.id, bp.id
            ORDER BY bs.beverage_name COLLATE NOCASE""",
         (cash_session_id,),
     ).fetchall()
@@ -1328,15 +1448,20 @@ def stock_view_rows(cash_session_id):
         item["regular_quantity"] = int(item["regular_quantity"] or 0)
         item["special_quantity"] = int(item["special_quantity"] or 0)
         item["benefit_quantity"] = int(item["benefit_quantity"] or 0)
+        item["bundle_quantity"] = int(item.get("bundle_quantity") or 0)
+        estimated_stock_consumed = float(item.get("consumed_stock") or 0)
         physical_consumed, observed_yield, yield_status = calculate_event_yield(initial, final, item["sold_quantity"])
         item["consumed_stock"] = physical_consumed
+        item["estimated_stock_consumed"] = round(estimated_stock_consumed, 4)
         item["observed_yield"] = observed_yield
         item["yield_status"] = yield_status
         approx_yield = suggested_approx_yield(item["stock_unit"], item["sale_unit"], item.get("beverage_type"), item.get("brand"), item.get("beverage_name")) if not float(item.get("approx_yield") or 0) else float(item.get("approx_yield") or 0)
         item["approx_yield"] = approx_yield
         item["category_group"] = infer_beverage_category(item.get("beverage_type"), item.get("brand"), item.get("sale_unit"), item.get("beverage_name"))
-        item["approx_consumed"] = round(item["sold_quantity"] / approx_yield, 2) if approx_yield > 0 else None
-        item["expected_final"] = round(initial - item["approx_consumed"], 2) if item["approx_consumed"] is not None else None
+        # El consumo estimado sale de los movimientos reales de stock. Así una venta de
+        # Champagne descuenta sus 2 Speed aunque esos Speed no sean un ticket adicional.
+        item["approx_consumed"] = round(estimated_stock_consumed, 2)
+        item["expected_final"] = round(initial - item["approx_consumed"], 2)
         item["difference"] = None
         rows.append(item)
     return rows
@@ -1390,7 +1515,7 @@ def clear_event_promoter_lists(db, cash_session_id):
     return int(counts["guests"] or 0), int(counts["checkins"] or 0)
 
 
-def session_movements(cash_session_id, limit=None, movement_type=None, payment_method=None):
+def session_movements(cash_session_id, limit=None, movement_type=None, payment_method=None, benefits_last=False):
     clauses = ["m.cash_session_id=?"]
     params = [cash_session_id]
     if movement_type in {"sale", "expense"}:
@@ -1405,7 +1530,9 @@ def session_movements(cash_session_id, limit=None, movement_type=None, payment_m
         JOIN users u ON u.id=m.created_by
         LEFT JOIN promoters p ON p.id=m.promoter_id
         WHERE {' AND '.join(clauses)}
-        ORDER BY m.id DESC
+        ORDER BY
+          {"CASE WHEN (m.total=0 OR m.category IN ('free','rrpp_benefit','birthday_benefit')) THEN 1 ELSE 0 END ASC," if benefits_last else ""}
+          m.id DESC
     """
     if limit:
         sql += " LIMIT ?"
@@ -1448,7 +1575,14 @@ def dashboard():
     active_promoters = get_db().execute("SELECT * FROM promoters WHERE active=1 AND is_common=0 AND is_promo=0 ORDER BY name COLLATE NOCASE").fetchall() if show_entries else []
     entry_prices = active_entry_prices() if show_entries else []
     beverages = get_db().execute("SELECT * FROM beverage_products WHERE active=1 ORDER BY name COLLATE NOCASE").fetchall() if show_beverages else []
-    beverage_groups = group_beverages(beverages) if show_beverages else []
+    beverage_groups = []
+    if show_beverages:
+        current_sold = beverage_paid_sales_by_product(cash["id"]) if cash else {}
+        previous_product_sales, previous_category_sales = previous_event_beverage_ranking(cash["id"]) if cash else ({}, {})
+        beverage_groups = group_beverages(
+            beverages, product_ranking=previous_product_sales,
+            category_ranking=previous_category_sales, sold_counts=current_sold,
+        )
     ticketing_products = get_db().execute("SELECT * FROM ticketing_products WHERE active=1 ORDER BY sort_order, name COLLATE NOCASE").fetchall() if show_entries else []
     birthday_promoters = []
     if cash and show_beverages:
@@ -1641,10 +1775,10 @@ def register_sale():
 
 def operation_datetime(value=None, epoch_ms=None):
     """Normaliza la hora de la operación usando el reloj de servidor guardado por la PWA."""
-    now_value = datetime.now().replace(microsecond=0)
+    now_value = argentina_now()
     if epoch_ms not in (None, ""):
         try:
-            parsed_epoch = datetime.fromtimestamp(float(epoch_ms) / 1000).replace(microsecond=0)
+            parsed_epoch = datetime.fromtimestamp(float(epoch_ms) / 1000, tz=ARGENTINA_TZ).replace(tzinfo=None, microsecond=0)
             if abs((now_value - parsed_epoch).total_seconds()) <= 7 * 24 * 60 * 60:
                 return parsed_epoch
         except (TypeError, ValueError, OSError, OverflowError):
@@ -1718,8 +1852,6 @@ def perform_quick_sale(db, cash, user, payload, *, created_at=None):
         stock_units = beverage_stock_consumption(product, quantity)
         sale_unit = product["sale_unit"] or "unidad"
         champagne_bundle = is_champagne_product(product)
-        if champagne_bundle and not find_speed_product(db):
-            raise ValueError("Para vender o entregar Champagne tenés que tener una variante activa de Speed en Bebidas")
         if sale_kind == "beverage":
             category = "drink"
             unit_price = float(product["price"])
@@ -1734,7 +1866,10 @@ def perform_quick_sale(db, cash, user, payload, *, created_at=None):
         elif sale_kind == "rrpp_benefit":
             category = "rrpp_benefit"
             unit_price = 0.0
+            beneficiary_comment = str(payload.get("beneficiary_comment", "")).strip()[:120]
             description = f"VOUCHER RRPP $0 · {product['name']} · 1 {sale_unit}" + (" · incluye 2 Speed" if champagne_bundle else "")
+            if beneficiary_comment:
+                description += f" · Beneficiario: {beneficiary_comment}"
             payment_method = "other"
         else:
             if not birthday_discount_available(operation_dt):
@@ -1780,11 +1915,12 @@ def perform_quick_sale(db, cash, user, payload, *, created_at=None):
         (cash["id"], category, movement_sector, description, quantity, unit_price, total, payment_method, operation_dt.isoformat(sep=" "), user["id"], promoter_id, beverage_product_id, stock_units),
     )
     champagne_bundle = bool(product is not None and is_champagne_product(product))
+    champagne_speed_adjusted = False
     if champagne_bundle:
-        add_champagne_speed_stock(
+        champagne_speed_adjusted = bool(add_champagne_speed_stock(
             db, cash, user, cursor.lastrowid, product, quantity, promoter_id=promoter_id,
             created_at=operation_dt.isoformat(sep=" "),
-        )
+        ))
     messages = {
         "rrpp_benefit": f"Voucher RRPP registrado: {product['name']} × 1. Valor $0; se descontó una consumición del stock.",
         "special_beverage": f"Bebida especial registrada y asignada al stock de {product['name']}.",
@@ -1792,8 +1928,10 @@ def perform_quick_sale(db, cash, user, payload, *, created_at=None):
     }
     default_message = f"Venta rápida registrada: {description} × {quantity}."
     message = messages.get(sale_kind, default_message)
-    if champagne_bundle:
+    if champagne_bundle and champagne_speed_adjusted:
         message += f" También se descontaron {quantity * 2} Speed ({2} por champagne)."
+    elif champagne_bundle:
+        message += " Champagne registrado correctamente. No había una variante Speed activa para descontar el acompañamiento; podés configurarla después en Bebidas."
     return {
         "movement_id": cursor.lastrowid,
         "message": message,
@@ -1837,7 +1975,7 @@ def register_expense():
     cash = get_open_cash_session()
     if not cash:
         flash("Primero tenés que abrir una caja.", "error")
-        return redirect(url_for("dashboard"))
+        return redirect(url_for("dashboard") + "#gastos-panel")
     try:
         description = request.form.get("description", "").strip()
         if len(description) < 2:
@@ -1848,7 +1986,7 @@ def register_expense():
             raise ValueError("Medio de pago inválido")
     except ValueError as exc:
         flash(f"No se pudo registrar el gasto: {exc}", "error")
-        return redirect(url_for("dashboard"))
+        return redirect(url_for("dashboard") + "#gastos-panel")
 
     get_db().execute(
         """
@@ -1859,7 +1997,7 @@ def register_expense():
     )
     get_db().commit()
     flash("Gasto registrado.", "success")
-    return redirect(url_for("dashboard"))
+    return redirect(url_for("dashboard") + "#gastos-panel")
 
 
 @app.post("/movements/<int:movement_id>/void")
@@ -1889,6 +2027,13 @@ def void_movement(movement_id):
             voided_at, g.user["id"], f"Anulado junto con movimiento #{movement_id}: {reason}"[:180],
             movement_id, f"%combo #{movement_id}%",
         ),
+    )
+    # v2.9.0: los componentes automáticos de combos viven fuera de movimientos.
+    db.execute(
+        """UPDATE beverage_stock_adjustments
+           SET voided=1, voided_at=?, voided_by=?
+           WHERE parent_movement_id=? AND voided=0""",
+        (voided_at, g.user["id"], movement_id),
     )
     # Si era un ingreso por lista, liberar el nombre para que pueda corregirse y volver a registrarse.
     db.execute("DELETE FROM guest_checkins WHERE movement_id=?", (movement_id,))
@@ -1948,7 +2093,7 @@ def make_backup():
     if not database_path.exists():
         return None
     BACKUP_DIR.mkdir(exist_ok=True)
-    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    stamp = argentina_now().strftime("%Y%m%d_%H%M%S")
     target = BACKUP_DIR / f"floki_{stamp}.db"
     source = sqlite3.connect(database_path)
     destination = sqlite3.connect(target)
@@ -2209,23 +2354,31 @@ def redeem_birthday_benefit(promoter_id):
         flash(f"Configurá en Bebidas estos productos antes de entregar la promo: {', '.join(missing)}.", "error")
         return redirect(url_for("dashboard"))
 
-    for product, qty, description in (
-        (champagne, 1, "Promo cumpleaños · Champagne"),
-        (speed, 2, "Promo cumpleaños · Speed"),
-    ):
-        db.execute(
+    try:
+        stamp = now_iso()
+        ensure_beverage_in_event_stock(db, cash["id"], champagne, g.user["id"])
+        movement = db.execute(
             """INSERT INTO movements(
                    cash_session_id, movement_type, category, sector, description, quantity,
                    unit_price, total, payment_method, created_at, created_by, promoter_id,
                    beverage_product_id, stock_units
-               ) VALUES (?, 'sale', 'birthday_benefit', 'beverages', ?, ?, 0, 0, 'other', ?, ?, ?, ?, ?)""",
-            (cash["id"], description, qty, now_iso(), g.user["id"], promoter_id, product["id"], beverage_stock_consumption(product, qty)),
+               ) VALUES (?, 'sale', 'birthday_benefit', 'beverages', ?, 1, 0, 0, 'other', ?, ?, ?, ?, ?)""",
+            (cash["id"], "Promo cumpleaños · Champagne · incluye 2 Speed", stamp, g.user["id"], promoter_id, champagne["id"], beverage_stock_consumption(champagne, 1)),
         )
-    db.execute(
-        "INSERT INTO birthday_benefits(cash_session_id, promoter_id, redeemed_at, redeemed_by) VALUES (?, ?, ?, ?)",
-        (cash["id"], promoter_id, now_iso(), g.user["id"]),
-    )
-    db.commit()
+        add_champagne_speed_stock(
+            db, cash, g.user, movement.lastrowid, champagne, 1,
+            promoter_id=promoter_id, created_at=stamp,
+        )
+        db.execute(
+            "INSERT INTO birthday_benefits(cash_session_id, promoter_id, redeemed_at, redeemed_by) VALUES (?, ?, ?, ?)",
+            (cash["id"], promoter_id, stamp, g.user["id"]),
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        app.logger.exception("Error entregando combo de cumpleaños Champagne + 2 Speed")
+        flash("No se pudo entregar el combo. No se descontó ningún producto; probá nuevamente.", "error")
+        return redirect(url_for("dashboard"))
     flash(
         f"Beneficio entregado a {promoter['birthday_person_name']}: 1 champagne + 2 Speed. Ingresaron {arrived} personas de su lista.",
         "success",
@@ -3031,6 +3184,90 @@ def export_stock_xlsx():
     return Response(payload, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={"Content-Disposition": f"attachment; filename={filename}"})
 
 
+@app.route("/beverages/history")
+@beverages_required
+def beverage_history():
+    """Historial completo del sector Bebidas sin exponer ganancias acumuladas."""
+    db = get_db()
+    event_value = request.args.get("event", "").strip()
+    kind = request.args.get("kind", "all").strip()
+    date_from = request.args.get("date_from", "").strip()
+    date_to = request.args.get("date_to", "").strip()
+    try:
+        page = max(1, int(request.args.get("page", "1") or 1))
+    except (TypeError, ValueError):
+        page = 1
+    page_size = 100
+
+    clauses = ["m.sector='beverages'", "m.movement_type='sale'", "m.category<>'champagne_speed'"]
+    params = []
+    selected_event = None
+    if event_value:
+        try:
+            selected_event = int(event_value)
+        except ValueError:
+            selected_event = None
+        if selected_event:
+            clauses.append("m.cash_session_id=?")
+            params.append(selected_event)
+    if date_from:
+        clauses.append("date(cs.event_date) >= date(?)")
+        params.append(date_from)
+    if date_to:
+        clauses.append("date(cs.event_date) <= date(?)")
+        params.append(date_to)
+    if kind == "paid":
+        clauses.append("m.total>0")
+    elif kind == "benefit":
+        clauses.append("m.total=0")
+        clauses.append("m.category IN ('rrpp_benefit','birthday_benefit')")
+    elif kind == "voided":
+        clauses.append("m.voided=1")
+    else:
+        kind = "all"
+
+    where_sql = " AND ".join(clauses)
+    total_row = db.execute(
+        f"""SELECT COUNT(*) AS total
+            FROM movements m
+            JOIN cash_sessions cs ON cs.id=m.cash_session_id
+            WHERE {where_sql}""",
+        params,
+    ).fetchone()
+    total_records = int(total_row["total"] or 0)
+    total_pages = max(1, (total_records + page_size - 1) // page_size)
+    page = min(page, total_pages)
+    offset = (page - 1) * page_size
+
+    movements = db.execute(
+        f"""SELECT m.*, cs.event_name, cs.event_date, cs.status AS event_status,
+                   u.name AS user_name, bp.name AS beverage_name
+            FROM movements m
+            JOIN cash_sessions cs ON cs.id=m.cash_session_id
+            JOIN users u ON u.id=m.created_by
+            LEFT JOIN beverage_products bp ON bp.id=m.beverage_product_id
+            WHERE {where_sql}
+            ORDER BY m.id DESC
+            LIMIT ? OFFSET ?""",
+        [*params, page_size, offset],
+    ).fetchall()
+
+    events = db.execute(
+        """SELECT DISTINCT cs.id, cs.event_name, cs.event_date, cs.status
+           FROM cash_sessions cs
+           JOIN movements m ON m.cash_session_id=cs.id
+           WHERE m.sector='beverages' AND m.movement_type='sale' AND m.category<>'champagne_speed'
+           ORDER BY cs.id DESC
+           LIMIT 250"""
+    ).fetchall()
+
+    return render_template(
+        "beverage_history.html",
+        movements=movements, events=events, total_records=total_records, page=page, total_pages=total_pages,
+        filters={"event": str(selected_event or ""), "kind": kind, "date_from": date_from, "date_to": date_to},
+    )
+
+
 @app.route("/history")
 @admin_required
 def history():
@@ -3086,6 +3323,7 @@ def delete_cash_session(session_id):
         db.execute("DELETE FROM list_workspaces WHERE cash_session_id=?", (session_id,))
         db.execute("DELETE FROM birthday_benefits WHERE cash_session_id=?", (session_id,))
         db.execute("DELETE FROM birthday_events WHERE cash_session_id=?", (session_id,))
+        db.execute("DELETE FROM beverage_stock_adjustments WHERE cash_session_id=?", (session_id,))
         db.execute("DELETE FROM beverage_stock WHERE cash_session_id=?", (session_id,))
         db.execute("DELETE FROM movements WHERE cash_session_id=?", (session_id,))
         db.execute("DELETE FROM cash_sessions WHERE id=?", (session_id,))
@@ -3116,7 +3354,7 @@ def session_detail(session_id):
     movement_type = request.args.get("type", "")
     payment_method = request.args.get("payment", "")
     totals, by_payment = session_totals(session_id)
-    movements = session_movements(session_id, movement_type=movement_type, payment_method=payment_method)
+    movements = session_movements(session_id, movement_type=movement_type, payment_method=payment_method, benefits_last=True)
     calculated_total = cash["opening_amount"] + totals["sales"] - totals["expenses"]
     if cash["status"] == "closed" and cash["expected_total"] is not None:
         expected_total = float(cash["expected_total"])
@@ -3156,7 +3394,7 @@ def session_print(session_id):
     if not cash:
         abort(404)
     totals, by_payment = session_totals(session_id)
-    movements = session_movements(session_id)
+    movements = session_movements(session_id, benefits_last=True)
     promoters = promoter_totals(session_id)
     inventory = stock_view_rows(session_id)
     return render_template("print_report.html", cash=cash, totals=totals, by_payment=by_payment, movements=movements, promoters=promoters, inventory=inventory)
@@ -3168,12 +3406,12 @@ def export_session_csv(session_id):
     cash = get_db().execute("SELECT * FROM cash_sessions WHERE id=?", (session_id,)).fetchone()
     if not cash:
         abort(404)
-    movements = session_movements(session_id)
+    movements = session_movements(session_id, benefits_last=True)
     buffer = io.StringIO()
     writer = csv.writer(buffer, delimiter=";")
     writer.writerow(["Floki Manager", f"Caja #{session_id}", cash["event_name"]])
     writer.writerow(["Fecha", "Sector", "Tipo", "Categoría", "Descripción", "Cantidad", "Precio unitario", "Total", "Medio de pago", "Promotor", "Usuario", "Anulado"])
-    for row in reversed(movements):
+    for row in movements:
         writer.writerow(
             [
                 row["created_at"],
@@ -3442,7 +3680,7 @@ def offline_bootstrap_payload():
     payload = {
         "version": APP_VERSION,
         "server_time": now_iso(),
-        "server_epoch_ms": int(datetime.now().timestamp() * 1000),
+        "server_epoch_ms": int(datetime.now(timezone.utc).timestamp() * 1000),
         "csrf_token": session.get("csrf_token"),
         "user": {
             "id": user["id"],
@@ -3720,6 +3958,7 @@ def diagnostic():
         "ticketing_products": ("SELECT COUNT(*) AS total FROM ticketing_products WHERE active=1", ()),
         "speed_active": ("SELECT COUNT(*) AS total FROM beverage_products WHERE active=1 AND (lower(brand)='speed' OR lower(name) LIKE '%speed%')", ()),
         "movement_bundle_columns": ("SELECT COUNT(*) AS total FROM movements WHERE category='champagne_speed'", ()),
+        "stock_adjustments": ("SELECT COUNT(*) AS total FROM beverage_stock_adjustments", ()),
     }
     ok = True
     for name, (sql, params) in probes.items():
