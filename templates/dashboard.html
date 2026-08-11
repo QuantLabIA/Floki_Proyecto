@@ -101,18 +101,22 @@
 {% endif %}
 
 {% if g.user['role']=='admin' %}
+<section class="admin-event-organization admin-event-organization-top">
+  <section class="hero-row event-hero-banner admin-event-banner admin-event-banner-wide" style="background-image:url('{{ url_for('event_banner', session_id=cash['id']) }}?v={{ cash['event_image_name'] or 'default' }}')">
+    <div class="event-hero-overlay"></div>
+    <div class="event-hero-content">
+      <p class="eyebrow"><span class="live-dot"></span> EVENTO ABIERTO · #{{ cash['id'] }} · {{ cash['event_date']|date_ar }}</p>
+      <h1>{{ cash['event_name'] }}</h1>
+      <p class="event-hero-muted">Caja abierta por {{ cash['opened_by_name'] }} · {{ cash['event_date']|date_ar }}</p>
+    </div>
+    <div class="event-hero-actions"><button class="secondary-button glass-button" data-modal-open="event-banner-modal">Cambiar imagen</button></div>
+  </section>
+</section>
+
 <section class="admin-priority-grid single-priority-panel">
   {% set compact_list_panel = true %}{% set smart_list_return = 'dashboard' %}{% set smart_list_title = 'Cargar y actualizar listas' %}{% include '_smart_list_import.html' %}
 </section>
 
-<section class="metric-grid admin-metrics statistics-after-actions">
-  <a class="metric-card metric-card-link metric-sales" href="{{ url_for('session_detail', session_id=cash['id'], type='sale') }}#movimientos"><i class="metric-icon">▣</i><span>Ventas</span><strong>{{ totals['sales']|money }}</strong><small>Ver ventas registradas →</small></a>
-  <a class="metric-card metric-card-link metric-tickets" href="{{ url_for('session_detail', session_id=cash['id'], type='sale') }}#movimientos"><i class="metric-icon">⌑</i><span>Tickets vendidos</span><strong>{{ totals['ticket_count'] }}</strong><small>{{ totals['paid_count'] }} entradas · {{ totals['paid_beverage_count'] }} bebidas →</small></a>
-  <a class="metric-card metric-card-link metric-beverages" href="{{ url_for('beverage_history', event=cash['id'], kind='paid') }}"><i class="metric-icon">◉</i><span>Bebidas vendidas</span><strong>{{ totals['paid_beverage_count'] }}</strong><small>Ver historial del evento →</small></a>
-  <a class="metric-card metric-card-link metric-expenses" href="#gastos-panel"><i class="metric-icon">−</i><span>Gastos</span><strong>{{ totals['expenses']|money }}</strong><small>Agregar o revisar gastos →</small></a>
-  <a class="metric-card metric-card-link metric-people" href="{{ url_for('promoter_lists') }}"><i class="metric-icon">♙</i><span>Ingresos</span><strong>{{ totals['people_count'] }}</strong><small>{{ totals['paid_count'] }} pagos · {{ totals['free_count'] }} free/lista →</small></a>
-  <a class="metric-card metric-card-link metric-cloakroom" href="{{ url_for('session_detail', session_id=cash['id'], type='sale') }}#movimientos"><i class="metric-icon">⌁</i><span>Guardarropa</span><strong>{{ totals['cloakroom_count'] }}</strong><small>Ver movimientos →</small></a>
-</section>
 {% elif sector=='ticketing' %}
 <section class="card operator-search-first">
   <div class="section-heading compact"><div><p class="eyebrow">FUNCIÓN PRINCIPAL</p><h2>Buscar y confirmar personas</h2><p class="muted compact-copy">Escribí un nombre y el sistema muestra todas las listas donde aparece.</p></div><a class="text-link" href="{{ url_for('promoter_lists') }}">Panel completo</a></div>
@@ -236,7 +240,7 @@
 <section class="card expense-entry-panel" id="gastos-panel">
   <div class="section-heading">
     <div><p class="eyebrow">GASTOS DEL EVENTO</p><h2>Agregar gasto</h2><p class="muted compact-copy">Registrá acá cualquier salida de dinero de la noche. Se descuenta automáticamente del resultado final.</p></div>
-    <a class="text-link" href="{{ url_for('session_detail', session_id=cash['id'], type='expense') }}#movimientos">Ver todos los gastos</a>
+    <span class="muted">Se incluyen automáticamente en el cierre</span>
   </div>
   <form action="{{ url_for('register_expense') }}" method="post" class="expense-quick-form">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -250,8 +254,7 @@
 <section class="action-grid single-action">
   <a class="action-card list-action" href="{{ url_for('promoter_lists') }}"><span>✓</span><strong>Entrada FREE por lista</strong><small>Buscar nombre y acreditar RRPP</small></a>
 </section>
-<section class="dashboard-grid">
-  <article class="card"><div class="section-heading"><div><p class="eyebrow">RESUMEN</p><h2>Medios registrados</h2><p class="muted compact-copy">Las bebidas figuran operativamente como efectivo. El Mercado Pago real se declara al cierre.</p></div></div><div class="payment-list">{% if by_payment %}{% for row in by_payment %}<div><span>{{ payment_labels[row['payment_method']] }}</span><strong>{{ row['net']|money }}</strong></div>{% endfor %}{% else %}<p class="muted">Todavía no hay movimientos.</p>{% endif %}</div></article>
+<section class="dashboard-grid single-dashboard-card">
   <article class="card"><div class="section-heading"><div><p class="eyebrow">RRPP</p><h2>Ingresos por promotor</h2></div><a href="{{ url_for('promoter_lists') }}">Ver listas</a></div><div class="promoter-ranking">{% if promoter_summary %}{% for row in promoter_summary %}<div><span><strong>{{ loop.index }}.</strong> {{ row['name'] }}</span><b>{{ row['people_count'] }} personas</b></div>{% endfor %}{% else %}<p class="muted">Los ingresos vinculados a promotores aparecerán acá.</p>{% endif %}</div></article>
 </section>
 {% elif sector=='ticketing' %}
@@ -260,7 +263,7 @@
 
 {% if g.user['role']=='admin' or sector in ['ticketing','beverages'] %}
 <section class="card">
-  <div class="section-heading"><div><p class="eyebrow">ACTIVIDAD DEL SECTOR</p><h2>Últimos movimientos</h2></div>{% if g.user['role']=='admin' %}<a href="{{ url_for('session_detail', session_id=cash['id']) }}">Ver reporte completo</a>{% elif sector=='beverages' %}<a href="{{ url_for('beverage_history', event=cash['id']) }}">Ver historial completo</a>{% endif %}</div>
+  <div class="section-heading"><div><p class="eyebrow">ACTIVIDAD DEL SECTOR</p><h2>Últimos movimientos</h2></div>{% if g.user['role']!='admin' and sector=='beverages' %}<a href="{{ url_for('beverage_history') }}">Consultar por horario</a>{% endif %}</div>
   <div class="movement-list">
     {% if movements %}{% for movement in movements %}
       <div class="movement-row {% if movement['voided'] %}voided{% endif %}">
@@ -274,21 +277,6 @@
 </section>
 {% endif %}
 
-{% if g.user['role']=='admin' %}
-<section class="admin-event-organization">
-  <div class="section-heading"><div><p class="eyebrow">ORGANIZACIÓN</p><h2>Evento abierto</h2><p class="muted compact-copy">La imagen, el estado de la jornada y el cierre quedan al final del dashboard.</p></div></div>
-  <section class="hero-row event-hero-banner admin-event-banner" style="background-image:url('{{ url_for('event_banner', session_id=cash['id']) }}?v={{ cash['event_image_name'] or 'default' }}')">
-    <div class="event-hero-overlay"></div>
-    <div class="event-hero-content">
-      <p class="eyebrow"><span class="live-dot"></span> EVENTO ABIERTO · #{{ cash['id'] }} · {{ cash['event_date']|date_ar }}</p>
-      <h1>{{ cash['event_name'] }}</h1>
-      <p class="hero-money">{{ expected_total|money }}</p>
-      <p class="event-hero-muted">Total esperado · abierta por {{ cash['opened_by_name'] }}</p>
-    </div>
-    <div class="event-hero-actions"><button class="secondary-button glass-button" data-modal-open="event-banner-modal">Cambiar imagen</button><button class="secondary-button glass-button" data-modal-open="close-cash-modal">Cerrar caja</button></div>
-  </section>
-</section>
-{% endif %}
 
 {% if show_beverages %}
 <div class="modal" id="rrpp-benefit-modal" aria-hidden="true"><div class="modal-backdrop" data-modal-close></div><section class="modal-card"><button class="modal-close" data-modal-close aria-label="Cerrar">×</button><p class="eyebrow">VOUCHER DE CONSUMICIÓN RRPP</p><h2>1 consumición · $0</h2><p class="muted">Elegí la bebida que se entrega. El comentario es opcional y sirve, por ejemplo, para anotar el nombre del beneficiario. Siempre registra una sola consumición y descuenta el stock.</p><form action="{{ url_for('register_quick_sale') }}" method="post" class="stack-form"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="sale_kind" value="rrpp_benefit"><input type="hidden" name="quantity" value="1"><input type="hidden" name="payment_method" value="other"><label>Bebida<select name="beverage_id" required>{% for group in beverage_groups %}<optgroup label="{{ group['label'] }}">{% for beverage in group['items'] %}<option value="{{ beverage['id'] }}">{{ beverage['name'] }} · {{ beverage['sale_unit'] }}</option>{% endfor %}</optgroup>{% endfor %}</select></label><label>Beneficiario / comentario <small>(opcional)</small><input name="beneficiary_comment" maxlength="120" placeholder="Ej.: Martina Gómez"></label><div class="voucher-fixed-summary"><strong>Valor: $0</strong><span>Cantidad: 1 consumición</span></div><button class="primary-button full" type="submit">Entregar voucher RRPP</button></form></section></div>
@@ -300,7 +288,7 @@
 
 {% if g.user['role']=='admin' %}
 <div class="modal" id="event-banner-modal" aria-hidden="true"><div class="modal-backdrop" data-modal-close></div><section class="modal-card"><button class="modal-close" data-modal-close aria-label="Cerrar">×</button><p class="eyebrow">IMAGEN DEL EVENTO</p><h2>Actualizar banner dinámico</h2><p class="muted">Subí una historia o flyer. El sistema la recorta visualmente para adaptarla al panel sin deformarla.</p><form action="{{ url_for('update_event_banner', session_id=cash['id']) }}" method="post" enctype="multipart/form-data" class="stack-form"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="return_to" value="{{ url_for('dashboard') }}"><input type="hidden" name="banner_action" value="replace"><label>Nueva imagen<input type="file" name="event_image" accept="image/jpeg,image/png,image/webp" required></label><button class="primary-button full" type="submit">Guardar nueva imagen</button></form><form action="{{ url_for('update_event_banner', session_id=cash['id']) }}" method="post" class="stack-form banner-remove-form" data-confirm="¿Volver al banner predeterminado de Floki?"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="return_to" value="{{ url_for('dashboard') }}"><input type="hidden" name="banner_action" value="remove"><button class="secondary-button full" type="submit">Quitar imagen y usar la predeterminada</button></form></section></div>
-<div class="modal" id="close-cash-modal" aria-hidden="true"><div class="modal-backdrop" data-modal-close></div><section class="modal-card"><button class="modal-close" data-modal-close aria-label="Cerrar">×</button><p class="eyebrow">CIERRE DE LA NOCHE</p><h2>Declarar dinero final</h2><div class="close-summary"><span>Total esperado</span><strong>{{ expected_total|money }}</strong></div>{% if stock_pending %}<div class="stock-close-warning"><strong>Stock pendiente</strong><span>{{ stock_pending }} bebidas todavía no tienen cantidad final.</span><a href="{{ url_for('stock') }}">Completar planilla</a></div>{% endif %}<p class="muted compact-copy">No hace falta indicar durante la noche qué bebida se pagó con efectivo o Mercado Pago. Declaralo una sola vez acá.</p><form action="{{ url_for('close_cash') }}" method="post" class="stack-form"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><div class="form-grid-2"><label>Plata en efectivo<input inputmode="decimal" name="declared_cash" required placeholder="0"></label><label>Declarar plata en Mercado Pago<input inputmode="decimal" name="declared_mercadopago" required value="0" placeholder="0"></label></div><small class="muted">Floki suma ambos importes y los compara contra el total esperado de la noche.</small><label>Observaciones<textarea name="notes" rows="3" maxlength="500" placeholder="Opcional"></textarea></label><button class="danger-button full" type="submit">Confirmar cierre</button></form></section></div>
+
 {% endif %}
 {% endif %}
 {% endblock %}

@@ -1621,3 +1621,21 @@ body.app-page .admin-quick-tabs {
   .previous-event-import { padding: 12px; }
   .import-items { max-height: 210px; }
 }
+
+
+/* v2.9.9 · cierre en Ajustes + banner de evento superior y ancho */
+.admin-event-organization-top { margin-top: 0; margin-bottom: 18px; }
+.admin-event-banner-wide { min-height: 210px; width: 100%; border-radius: 22px; }
+.admin-event-banner-wide .event-hero-content { max-width: 760px; }
+.admin-event-banner-wide .event-hero-content h1 { font-size: clamp(2rem, 4vw, 3.45rem); }
+.settings-close-cash-card { overflow: hidden; }
+.settings-close-cash-layout { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 22px; align-items: center; }
+.settings-close-cash-action { min-width: 220px; display: flex; justify-content: flex-end; }
+.settings-close-button { min-width: 220px; text-align: center; justify-content: center; }
+.settings-close-event-meta { display: flex; gap: 12px; align-items: center; margin-top: 12px; flex-wrap: wrap; }
+.settings-close-event-meta > span { display: inline-flex; align-items: center; gap: 7px; }
+@media (max-width: 720px) {
+  .admin-event-banner-wide { min-height: 180px; }
+  .settings-close-cash-layout { grid-template-columns: 1fr; }
+  .settings-close-cash-action, .settings-close-button { width: 100%; min-width: 0; }
+}

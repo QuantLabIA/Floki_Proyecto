@@ -1,10 +1,28 @@
 {% extends 'base.html' %}
 {% block title %}Configuración · Floki Manager{% endblock %}
 {% block content %}
-<section class="page-heading"><div><p class="eyebrow">{{ 'ADMINISTRACIÓN' if g.user['role']=='admin' else 'MI CUENTA' }}</p><h1>{{ 'Configuración' if g.user['role']=='admin' else 'Mi cuenta' }}</h1><p class="muted">{{ 'Precios automáticos, bebidas, promotores, códigos QR, usuarios y respaldos.' if g.user['role']=='admin' else 'Actualizá la seguridad de tu acceso.' }}</p></div></section>
+<section class="page-heading"><div><p class="eyebrow">{{ 'ADMINISTRACIÓN' if g.user['role']=='admin' else 'MI CUENTA' }}</p><h1>{{ 'Configuración' if g.user['role']=='admin' else 'Mi cuenta' }}</h1><p class="muted">{{ 'Cierre de caja, precios, bebidas, promotores, usuarios y respaldos.' if g.user['role']=='admin' else 'Actualizá la seguridad de tu acceso.' }}</p></div></section>
 
 <section class="settings-grid">
   {% if g.user['role'] == 'admin' %}
+  <article class="card wide-card settings-close-cash-card" id="cierre-caja">
+    <div class="settings-close-cash-layout">
+      <div>
+        <p class="eyebrow">CIERRE DE CAJA</p>
+        {% if cash %}
+        <h2>Cerrar {{ cash['event_name'] }}</h2>
+        <p class="muted compact-copy">El cierre abre el reporte completo del evento con ventas, gastos, ganancia neta, tickets, bebidas, stock y movimientos. Los importes se calculan automáticamente.</p>
+        <div class="settings-close-event-meta"><span><span class="live-dot"></span> Evento abierto</span><strong>{{ cash['event_date']|date_ar }}</strong></div>
+        {% else %}
+        <h2>No hay una caja abierta</h2>
+        <p class="muted compact-copy">Cuando haya un evento en curso, desde este panel vas a poder abrir el reporte completo y confirmar el cierre.</p>
+        {% endif %}
+      </div>
+      <div class="settings-close-cash-action">
+        {% if cash %}<a class="danger-button settings-close-button" href="{{ url_for('close_cash') }}">Abrir cierre de caja</a>{% else %}<a class="secondary-button settings-close-button" href="{{ url_for('dashboard') }}">Ir al inicio</a>{% endif %}
+      </div>
+    </div>
+  </article>
   <article class="card wide-card" id="precios">
     <div class="section-heading"><div><p class="eyebrow">PRECIOS DE ENTRADAS</p><h2>Antes y después del horario</h2><p class="muted compact-copy">La caja elige automáticamente el precio de la entrada general. FREE se confirma exclusivamente desde las listas; VIP y anticipada fueron eliminadas.</p></div></div>
     <form action="{{ url_for('update_prices') }}" method="post" class="stack-form" data-ajax-price-settings>

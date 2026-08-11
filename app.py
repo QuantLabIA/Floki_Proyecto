@@ -68,7 +68,7 @@ DATA_DIR = BASE_DIR / "data"
 BACKUP_DIR = BASE_DIR / "backups"
 DATABASE = DATA_DIR / "floki.db"
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
-APP_VERSION = "2.9.7"
+APP_VERSION = "2.9.9"
 ARGENTINA_TZ = ZoneInfo("America/Argentina/Buenos_Aires")
 
 PAYMENT_METHODS = {"cash", "mercadopago", "transfer", "debit", "credit", "other"}
@@ -1766,17 +1766,21 @@ def dashboard():
             by_payment = []
             promoter_summary = promoter_totals(cash["id"])
         else:
-            # Caja de bebidas puede revisar sus últimos movimientos operativos,
-            # pero sigue sin acceder a totales acumulados, ganancias ni reportes completos.
-            beverage_activity_categories = {
-                "drink", "drink_special", "rrpp_benefit",
-                "birthday_benefit", "birthday_discount"
-            }
-            movements = [
-                row for row in all_movements
-                if row["sector"] == "beverages"
-                and row["category"] in beverage_activity_categories
-            ][:20]
+            # Caja de bebidas ve exactamente los últimos 20 movimientos de su sector,
+            # sin depender de cuántas operaciones de boletería haya entre medio.
+            movements = get_db().execute(
+                """SELECT m.*, u.name AS user_name, p.name AS promoter_name
+                   FROM movements m
+                   JOIN users u ON u.id=m.created_by
+                   LEFT JOIN promoters p ON p.id=m.promoter_id
+                   WHERE m.cash_session_id=?
+                     AND m.sector='beverages'
+                     AND m.movement_type='sale'
+                     AND m.category<>'champagne_speed'
+                   ORDER BY m.id DESC
+                   LIMIT 20""",
+                (cash["id"],),
+            ).fetchall()
             by_payment = []
             promoter_summary = []
         occupancy_percent = round((totals["people_count"] / cash["capacity"] * 100), 1) if cash["capacity"] else 0
@@ -2260,36 +2264,59 @@ def void_movement(movement_id):
     return redirect(request.referrer or url_for("dashboard"))
 
 
-@app.post("/cash/close")
+@app.route("/cash/close", methods=["GET", "POST"])
 @admin_required
 def close_cash():
+    """Vista de cierre + cierre automático del evento.
+
+    Desde v2.9.8 el administrador ya no declara manualmente efectivo ni Mercado
+    Pago. Floki calcula ventas, gastos, ganancia neta y total final directamente
+    desde los movimientos registrados. El GET funciona como el nuevo panel de
+    "Reporte completo" previo al cierre; el POST confirma el cierre.
+    """
     cash = get_open_cash_session()
     if not cash:
         flash("No hay una caja abierta.", "error")
         return redirect(url_for("dashboard"))
-    try:
-        declared_cash = money_to_float(request.form.get("declared_cash"))
-        declared_mercadopago = money_to_float(request.form.get("declared_mercadopago", "0"))
-    except ValueError as exc:
-        flash(str(exc), "error")
-        return redirect(url_for("dashboard"))
-    totals, _ = session_totals(cash["id"])
-    # expected_cash se conserva para compatibilidad histórica; el control real
-    # de esta versión compara el total teórico con efectivo + Mercado Pago declarados.
+
+    totals, by_payment = session_totals(cash["id"])
     expected_cash = round(cash["opening_amount"] + totals["cash_sales"] - totals["cash_expenses"], 2)
     expected_total = round(cash["opening_amount"] + totals["sales"] - totals["expenses"], 2)
-    declared_total = round(declared_cash + declared_mercadopago, 2)
-    difference = round(declared_total - expected_total, 2)
+    net_profit = round(totals["sales"] - totals["expenses"], 2)
+
+    if request.method == "GET":
+        movements = session_movements(cash["id"], benefits_last=True)
+        promoters = promoter_totals(cash["id"])
+        inventory = stock_view_rows(cash["id"])
+        stock_pending = get_db().execute(
+            """SELECT COUNT(*) FROM beverage_stock bs
+               JOIN beverage_products bp ON bp.id=bs.beverage_id
+               WHERE bs.cash_session_id=? AND bp.active=1 AND bs.final_quantity IS NULL""",
+            (cash["id"],),
+        ).fetchone()[0]
+        return render_template(
+            "close_cash.html",
+            cash=cash,
+            totals=totals,
+            by_payment=by_payment,
+            movements=movements,
+            expected_total=expected_total,
+            net_profit=net_profit,
+            promoters=promoters,
+            inventory=inventory,
+            stock_pending=stock_pending,
+        )
+
     notes = request.form.get("notes", "").strip()[:500]
     db = get_db()
     db.execute(
         """
         UPDATE cash_sessions
-        SET status='closed', closed_at=?, closed_by=?, declared_cash=?, declared_mercadopago=?, declared_total=?,
-            expected_cash=?, expected_total=?, difference=?, notes=?
+        SET status='closed', closed_at=?, closed_by=?, declared_cash=NULL, declared_mercadopago=NULL,
+            declared_total=?, expected_cash=?, expected_total=?, difference=0, notes=?
         WHERE id=?
         """,
-        (now_iso(), g.user["id"], declared_cash, declared_mercadopago, declared_total, expected_cash, expected_total, difference, notes, cash["id"]),
+        (now_iso(), g.user["id"], expected_total, expected_cash, expected_total, notes, cash["id"]),
     )
     renewed_qrs = rotate_promoter_qr_tokens(db)
     removed_guests, removed_checkins = clear_event_promoter_lists(db, cash["id"])
@@ -2297,7 +2324,9 @@ def close_cash():
     backup = make_backup()
     backup_message = "respaldo local creado" if backup else "datos guardados en la base cloud"
     flash(
-        f"Caja cerrada y {backup_message}. Se eliminaron {removed_guests} nombres de listas y {removed_checkins} confirmaciones; {renewed_qrs} códigos QR renovados para la próxima jornada.",
+        f"Caja cerrada automáticamente y {backup_message}. Ganancia neta: {money_filter(net_profit)}. "
+        f"Se eliminaron {removed_guests} nombres de listas y {removed_checkins} confirmaciones; "
+        f"{renewed_qrs} códigos QR renovados para la próxima jornada.",
         "success",
     )
     return redirect(url_for("session_detail", session_id=cash["id"]))
@@ -3408,8 +3437,99 @@ def export_stock_xlsx():
 @app.route("/beverages/history")
 @beverages_required
 def beverage_history():
-    """Historial completo del sector Bebidas sin exponer ganancias acumuladas."""
+    """Auditoría de bebidas con privacidad distinta por rol.
+
+    - Caja de bebidas: solo el evento abierto. Por defecto muestra las últimas
+      20 operaciones; si indica un inicio y un fin, muestra todas las bebidas
+      registradas dentro de ese lapso y un resumen por producto.
+    - Administrador: conserva el historial completo y los filtros históricos.
+    """
     db = get_db()
+
+    if g.user["role"] != "admin":
+        cash = get_open_cash_session()
+        time_from = request.args.get("time_from", "").strip()
+        time_to = request.args.get("time_to", "").strip()
+        interval_active = False
+        interval_summary = []
+        movements = []
+
+        if not cash:
+            return render_template(
+                "beverage_history.html",
+                operator_mode=True, cash=None, movements=[], events=[], total_records=0,
+                page=1, total_pages=1, interval_active=False, interval_summary=[],
+                filters={"time_from": time_from, "time_to": time_to},
+            )
+
+        rows = db.execute(
+            """SELECT m.*, cs.event_name, cs.event_date, cs.status AS event_status,
+                      u.name AS user_name, bp.name AS beverage_name
+               FROM movements m
+               JOIN cash_sessions cs ON cs.id=m.cash_session_id
+               JOIN users u ON u.id=m.created_by
+               LEFT JOIN beverage_products bp ON bp.id=m.beverage_product_id
+               WHERE m.cash_session_id=?
+                 AND m.sector='beverages'
+                 AND m.movement_type='sale'
+                 AND m.category<>'champagne_speed'
+               ORDER BY m.id DESC""",
+            (cash["id"],),
+        ).fetchall()
+
+        if bool(time_from) != bool(time_to):
+            flash("Para consultar un lapso completá Desde y Hasta.", "error")
+        elif time_from and time_to:
+            try:
+                start_dt = datetime.fromisoformat(time_from)
+                end_dt = datetime.fromisoformat(time_to)
+                if start_dt.tzinfo is None:
+                    start_dt = start_dt.replace(tzinfo=ARGENTINA_TZ)
+                else:
+                    start_dt = start_dt.astimezone(ARGENTINA_TZ)
+                if end_dt.tzinfo is None:
+                    end_dt = end_dt.replace(tzinfo=ARGENTINA_TZ)
+                else:
+                    end_dt = end_dt.astimezone(ARGENTINA_TZ)
+                if end_dt < start_dt:
+                    raise ValueError("El horario Hasta debe ser posterior al horario Desde.")
+
+                filtered = []
+                for row in rows:
+                    try:
+                        movement_dt = parse_datetime_to_argentina(row["created_at"], legacy_naive_utc=True)
+                    except (TypeError, ValueError):
+                        continue
+                    if start_dt <= movement_dt <= end_dt:
+                        filtered.append(row)
+                movements = filtered
+                interval_active = True
+
+                summary = {}
+                for row in movements:
+                    if row["voided"]:
+                        continue
+                    name = row["beverage_name"] or row["description"] or CATEGORY_LABELS.get(row["category"], row["category"])
+                    summary[name] = summary.get(name, 0) + int(row["quantity"] or 0)
+                interval_summary = [
+                    {"name": name, "quantity": quantity}
+                    for name, quantity in sorted(summary.items(), key=lambda item: (-item[1], item[0].casefold()))
+                ]
+            except (TypeError, ValueError) as exc:
+                flash(str(exc) if str(exc) else "Los horarios ingresados no son válidos.", "error")
+                movements = rows[:20]
+        else:
+            movements = rows[:20]
+
+        return render_template(
+            "beverage_history.html",
+            operator_mode=True, cash=cash, movements=movements, events=[],
+            total_records=len(movements), page=1, total_pages=1,
+            interval_active=interval_active, interval_summary=interval_summary,
+            filters={"time_from": time_from, "time_to": time_to},
+        )
+
+    # Administración conserva la auditoría histórica completa.
     event_value = request.args.get("event", "").strip()
     kind = request.args.get("kind", "all").strip()
     date_from = request.args.get("date_from", "").strip()
@@ -3484,7 +3604,9 @@ def beverage_history():
 
     return render_template(
         "beverage_history.html",
-        movements=movements, events=events, total_records=total_records, page=page, total_pages=total_pages,
+        operator_mode=False, cash=None, movements=movements, events=events,
+        total_records=total_records, page=page, total_pages=total_pages,
+        interval_active=False, interval_summary=[],
         filters={"event": str(selected_event or ""), "kind": kind, "date_from": date_from, "date_to": date_to},
     )
 
@@ -3509,8 +3631,6 @@ def history():
     sessions = get_db().execute(
         f"""
         SELECT cs.*, u.name AS opened_by_name,
-               COALESCE(SUM(CASE WHEN m.movement_type='sale' AND m.voided=0 THEN m.total ELSE 0 END), 0) AS sales,
-               COALESCE(SUM(CASE WHEN m.movement_type='expense' AND m.voided=0 THEN m.total ELSE 0 END), 0) AS expenses,
                COALESCE(SUM(CASE WHEN m.movement_type='sale' AND m.category IN ('general','advance','vip','free') AND m.voided=0 THEN m.quantity ELSE 0 END), 0) AS people_count
         FROM cash_sessions cs
         JOIN users u ON u.id=cs.opened_by
@@ -3572,6 +3692,9 @@ def session_detail(session_id):
     ).fetchone()
     if not cash:
         abort(404)
+    if cash["status"] == "open":
+        # El reporte del evento abierto vive únicamente en el panel de cierre.
+        return redirect(url_for("close_cash"))
     movement_type = request.args.get("type", "")
     payment_method = request.args.get("payment", "")
     totals, by_payment = session_totals(session_id)
@@ -3664,10 +3787,12 @@ def settings():
         beverage_groups = group_beverages(beverages)
         ticketing_products = get_db().execute("SELECT * FROM ticketing_products ORDER BY active DESC, sort_order, name COLLATE NOCASE").fetchall()
         backup_files = [] if is_postgres_url(app.config.get("DATABASE_URL")) else sorted(BACKUP_DIR.glob("floki_*.db"), key=lambda p: p.stat().st_mtime, reverse=True)[:5]
+        cash = get_open_cash_session()
     else:
         users = promoters = entry_prices = beverages = ticketing_products = backup_files = []
         beverage_groups = []
-    return render_template("settings.html", users=users, promoters=promoters, entry_prices=entry_prices, beverages=beverages, beverage_groups=beverage_groups, ticketing_products=ticketing_products, backups=backup_files)
+        cash = None
+    return render_template("settings.html", users=users, promoters=promoters, entry_prices=entry_prices, beverages=beverages, beverage_groups=beverage_groups, ticketing_products=ticketing_products, backups=backup_files, cash=cash)
 
 
 @app.post("/settings/users")
