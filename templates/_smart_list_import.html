@@ -11,7 +11,7 @@
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <input type="hidden" name="return_to" value="{{ smart_list_return|default('dashboard') }}">
     <label class="smart-text-label">Pegar mensaje
-      <textarea name="source_text" rows="{{ 7 if compact_list_panel else 10 }}" maxlength="100000" placeholder="CINTIA DÍAZ&#10;Pilar Tutti&#10;Ingrid Becerra&#10;&#10;PROMOS&#10;Ana Gómez"></textarea>
+      <textarea name="source_text" rows="{{ 7 if compact_list_panel else 10 }}" maxlength="100000" placeholder="Pegá acá el mensaje de listas"></textarea>
     </label>
     <div class="smart-import-bottom">
       <label class="file-drop">Archivo PDF o DOCX

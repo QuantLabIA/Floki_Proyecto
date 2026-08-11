@@ -68,7 +68,7 @@ DATA_DIR = BASE_DIR / "data"
 BACKUP_DIR = BASE_DIR / "backups"
 DATABASE = DATA_DIR / "floki.db"
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
-APP_VERSION = "2.9.6"
+APP_VERSION = "2.9.7"
 ARGENTINA_TZ = ZoneInfo("America/Argentina/Buenos_Aires")
 
 PAYMENT_METHODS = {"cash", "mercadopago", "transfer", "debit", "credit", "other"}
@@ -201,8 +201,22 @@ def argentina_now():
     return datetime.now(ARGENTINA_TZ).replace(tzinfo=None, microsecond=0)
 
 
+def argentina_aware(value=None):
+    """Devuelve un datetime consciente de zona horaria en Argentina."""
+    parsed = value or argentina_now()
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=ARGENTINA_TZ)
+    return parsed.astimezone(ARGENTINA_TZ)
+
+
 def now_iso():
-    return argentina_now().isoformat(sep=" ")
+    # Desde v2.9.7 los timestamps nuevos guardan explícitamente -03:00.
+    # Esto evita que Railway/PostgreSQL y el navegador puedan interpretarlos como UTC.
+    return argentina_aware().replace(microsecond=0).isoformat(sep=" ")
+
+
+def argentina_time_iso(value=None):
+    return argentina_aware(value).replace(microsecond=0).isoformat(sep=" ")
 
 
 def public_base_url():
@@ -1347,15 +1361,43 @@ def money_filter(value):
     return "$ " + formatted.replace(",", "X").replace(".", ",").replace("X", ".")
 
 
+def parse_datetime_to_argentina(value, *, legacy_naive_utc=False):
+    """Normaliza timestamps para mostrarlos siempre en hora argentina.
+
+    Las versiones antiguas a v2.9.1 podían guardar valores sin zona usando el
+    reloj UTC de Railway. En el reporte completo esos valores legacy se
+    interpretan como UTC. Los timestamps nuevos llevan offset -03:00 y no son
+    ambiguos.
+    """
+    if isinstance(value, datetime):
+        parsed = value
+    else:
+        text = str(value).strip()
+        if text.endswith("Z"):
+            text = text[:-1] + "+00:00"
+        parsed = datetime.fromisoformat(text)
+    if parsed.tzinfo is None:
+        source_tz = timezone.utc if legacy_naive_utc else ARGENTINA_TZ
+        parsed = parsed.replace(tzinfo=source_tz)
+    return parsed.astimezone(ARGENTINA_TZ)
+
+
 @app.template_filter("datetime_ar")
 def datetime_filter(value):
     if not value:
         return "—"
     try:
-        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-        if parsed.tzinfo is not None:
-            parsed = parsed.astimezone(ARGENTINA_TZ).replace(tzinfo=None)
-        return parsed.strftime("%d/%m/%Y %H:%M")
+        return parse_datetime_to_argentina(value).strftime("%d/%m/%Y %H:%M")
+    except (TypeError, ValueError):
+        return value
+
+
+@app.template_filter("datetime_report_ar")
+def datetime_report_filter(value):
+    if not value:
+        return "—"
+    try:
+        return parse_datetime_to_argentina(value, legacy_naive_utc=True).strftime("%d/%m/%Y %H:%M")
     except (TypeError, ValueError):
         return value
 
@@ -1783,7 +1825,7 @@ def open_cash():
         opening_amount = money_to_float(opening_raw) if opening_raw else 0.0
         event_name = request.form.get("event_name", "Noche Floki").strip()[:100] or "Noche Floki"
         capacity = positive_int(capacity_raw or "0", "La capacidad", maximum=10000, allow_zero=True)
-        event_date = request.form.get("event_date", "").strip() or date.today().isoformat()
+        event_date = request.form.get("event_date", "").strip() or argentina_now().date().isoformat()
         try:
             date.fromisoformat(event_date)
         except ValueError as exc:
@@ -1957,7 +1999,7 @@ def register_sale():
 
 
 def operation_datetime(value=None, epoch_ms=None):
-    """Normaliza la hora de la operación usando el reloj de servidor guardado por la PWA."""
+    """Normaliza la hora de una operación a Argentina sin confiar en Railway ni en el huso del dispositivo."""
     now_value = argentina_now()
     if epoch_ms not in (None, ""):
         try:
@@ -1968,17 +2010,22 @@ def operation_datetime(value=None, epoch_ms=None):
             pass
     if not value:
         return now_value
-    text = str(value).strip().replace("T", " ").replace("Z", "")[:19]
     try:
-        parsed = datetime.fromisoformat(text)
-    except ValueError:
+        text = str(value).strip()
+        if text.endswith("Z"):
+            text = text[:-1] + "+00:00"
+        parsed = datetime.fromisoformat(text.replace("T", " "))
+        if parsed.tzinfo is not None:
+            parsed = parsed.astimezone(ARGENTINA_TZ).replace(tzinfo=None)
+        parsed = parsed.replace(microsecond=0)
+    except (TypeError, ValueError):
         return now_value
     delta_seconds = abs((now_value - parsed).total_seconds())
     return parsed if delta_seconds <= 7 * 24 * 60 * 60 else now_value
 
 
 def operation_time_iso(value=None, epoch_ms=None):
-    return operation_datetime(value, epoch_ms).isoformat(sep=" ")
+    return argentina_time_iso(operation_datetime(value, epoch_ms))
 
 
 def perform_quick_sale(db, cash, user, payload, *, created_at=None):
@@ -2094,7 +2141,7 @@ def perform_quick_sale(db, cash, user, payload, *, created_at=None):
         INSERT INTO movements(cash_session_id, movement_type, category, sector, description, quantity, unit_price, total, payment_method, created_at, created_by, promoter_id, beverage_product_id, stock_units)
         VALUES (?, 'sale', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (cash["id"], category, movement_sector, description, quantity, unit_price, total, payment_method, operation_dt.isoformat(sep=" "), user["id"], promoter_id, beverage_product_id, stock_units),
+        (cash["id"], category, movement_sector, description, quantity, unit_price, total, payment_method, argentina_time_iso(operation_dt), user["id"], promoter_id, beverage_product_id, stock_units),
     )
     messages = {
         "rrpp_benefit": f"Voucher RRPP registrado: {product['name']} × 1. Valor $0; se descontó una consumición del stock.",
@@ -3074,7 +3121,7 @@ def perform_guest_checkin(db, cash, user, guest_id, *, created_at=None):
             INSERT INTO guest_checkins(cash_session_id, promoter_guest_id, promoter_id, guest_name, normalized_name, checked_in_at, checked_in_by)
             VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            (cash["id"], guest["id"], guest["promoter_id"], guest["guest_name"], guest["normalized_name"], operation_dt.isoformat(sep=" "), user["id"]),
+            (cash["id"], guest["id"], guest["promoter_id"], guest["guest_name"], guest["normalized_name"], argentina_time_iso(operation_dt), user["id"]),
         )
         checkin_id = cursor.lastrowid
         movement = db.execute(
@@ -3082,7 +3129,7 @@ def perform_guest_checkin(db, cash, user, guest_id, *, created_at=None):
             INSERT INTO movements(cash_session_id, movement_type, category, sector, description, quantity, unit_price, total, payment_method, created_at, created_by, promoter_id)
             VALUES (?, 'sale', 'free', 'ticketing', ?, 1, 0, 0, 'other', ?, ?, ?)
             """,
-            (cash["id"], f"Lista: {guest['guest_name']}", operation_dt.isoformat(sep=" "), user["id"], guest["promoter_id"]),
+            (cash["id"], f"Lista: {guest['guest_name']}", argentina_time_iso(operation_dt), user["id"], guest["promoter_id"]),
         )
         db.execute("UPDATE guest_checkins SET movement_id=? WHERE id=?", (movement.lastrowid, checkin_id))
     except DB_INTEGRITY_ERRORS as exc:
@@ -3588,7 +3635,7 @@ def export_session_csv(session_id):
     for row in movements:
         writer.writerow(
             [
-                row["created_at"],
+                datetime_report_filter(row["created_at"]),
                 SECTOR_LABELS.get(row["sector"], row["sector"]),
                 "Venta" if row["movement_type"] == "sale" else "Gasto",
                 CATEGORY_LABELS.get(row["category"], row["category"]),
