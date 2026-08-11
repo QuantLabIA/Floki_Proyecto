@@ -104,6 +104,33 @@ class OfflineFirstTests(unittest.TestCase):
         self.assertEqual(movement_count, 1)
         self.assertEqual(operation_count, 1)
 
+
+    def test_offline_expense_sync_is_idempotent(self):
+        bootstrap = self.client.get("/api/offline/bootstrap").get_json()
+        session_id = bootstrap["cash_session"]["id"]
+        user_id = bootstrap["user"]["id"]
+        operation = {
+            "operation_id": "op-test-expense-0001",
+            "operation_type": "expense",
+            "cash_session_id": session_id,
+            "user_id": user_id,
+            "created_at": datetime.now().replace(hour=2, minute=10, second=0, microsecond=0).isoformat(sep=" "),
+            "payload": {"description": "Hielo", "amount": "15000", "payment_method": "cash"},
+        }
+        first = self.post_sync([operation])
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(first.get_json()["summary"]["applied"], 1)
+        second = self.post_sync([operation])
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(second.get_json()["results"][0]["status"], "applied")
+
+        connection = sqlite3.connect(self.db_path)
+        movement_count = connection.execute(
+            "SELECT COUNT(*) FROM movements WHERE movement_type='expense' AND description='Hielo' AND total=15000"
+        ).fetchone()[0]
+        connection.close()
+        self.assertEqual(movement_count, 1)
+
     def test_offline_guest_checkin_and_duplicate_conflict(self):
         bootstrap = self.client.get("/api/offline/bootstrap").get_json()
         session_id = bootstrap["cash_session"]["id"]

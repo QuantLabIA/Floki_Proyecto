@@ -8,6 +8,7 @@
   const operationArea = document.querySelector('[data-offline-operation-area]');
   const conflictPanel = document.querySelector('[data-offline-conflict-panel]');
   const conflictList = document.querySelector('[data-offline-conflict-list]');
+  let adminMode = 'ticketing';
 
   const currentEntryPrice = (entry) => {
     const [hour, minute] = String(entry.cutoff_time || '03:30').split(':').map(Number);
@@ -113,7 +114,6 @@
     const products = bootstrap.beverages || [];
     const productOptions = products.map((item) => `<option value="${item.id}">${window.FlokiOffline.escapeHtml(item.name)} · ${window.FlokiOffline.escapeHtml(item.sale_unit)}</option>`).join('');
     const birthdayOptions = (bootstrap.birthdays || []).filter((item) => item.birthday_checked_in).map((item) => `<option value="${item.promoter_id}">${window.FlokiOffline.escapeHtml(item.birthday_person_name)} · ${item.checked_count} ingresaron</option>`).join('');
-    const priceOptions = Array.from({ length: 100 }, (_, index) => (index + 1) * 1000).map((value) => `<option value="${value}">${money(value)}</option>`).join('');
     operationArea.innerHTML = `
       <section class="card offline-controls-card">
         <div class="section-heading compact"><div><p class="eyebrow">BEBIDAS OFFLINE</p><h2>Venta rápida</h2></div></div>
@@ -122,7 +122,7 @@
       </section>
       <section class="card offline-benefit-forms">
         <details><summary><strong>BENEFICIO RRPP</strong><small>Sin cobro · descuenta stock</small></summary><div class="details-content stack-form"><label>Bebida<select data-benefit-beverage>${productOptions}</select></label><label>Beneficiario / comentario <small>(opcional)</small><input data-benefit-comment maxlength="120" placeholder="Ej.: Martina Gómez"></label><button type="button" class="primary-button full" data-offline-benefit>Guardar beneficio</button></div></details>
-        <details><summary><strong>Bebida especial</strong><small>Precio variable y comentario</small></summary><div class="details-content stack-form"><label>Bebida<select data-special-beverage>${productOptions}</select></label><div class="form-grid-2"><label>Cantidad<select data-special-quantity>${Array.from({ length: 20 }, (_, index) => `<option value="${index + 1}">${index + 1}</option>`).join('')}</select></label><label>Precio unitario<select data-special-price>${priceOptions}</select></label></div><label>Comentario<input data-special-comment maxlength="160" placeholder="Ej.: promoción 2x1" required></label><label>Medio de pago<select data-special-payment><option value="cash">Efectivo</option><option value="mercadopago">Mercado Pago</option><option value="transfer">Transferencia</option><option value="debit">Débito</option><option value="credit">Crédito</option><option value="other">Otro</option></select></label><button type="button" class="primary-button full" data-offline-special>Guardar bebida especial</button></div></details>
+        <details><summary><strong>Bebida especial</strong><small>Precio variable y comentario</small></summary><div class="details-content stack-form"><label>Bebida<select data-special-beverage>${productOptions}</select></label><div class="form-grid-2"><label>Cantidad<select data-special-quantity>${Array.from({ length: 20 }, (_, index) => `<option value="${index + 1}">${index + 1}</option>`).join('')}</select></label><label>Precio unitario<input data-special-price type="number" min="500" max="300000" step="500" value="5000"></label></div><label>Comentario<input data-special-comment maxlength="160" placeholder="Ej.: promoción 2x1" required></label><label>Medio de pago<select data-special-payment><option value="cash">Efectivo</option><option value="mercadopago">Mercado Pago</option><option value="transfer">Transferencia</option><option value="debit">Débito</option><option value="credit">Crédito</option><option value="other">Otro</option></select></label><button type="button" class="primary-button full" data-offline-special>Guardar bebida especial</button></div></details>
         ${birthdayOptions ? `<details><summary><strong>50% OFF cumpleaños</strong><small>Se valida al sincronizar</small></summary><div class="details-content stack-form"><label>Cumpleaños<select data-birthday-promoter>${birthdayOptions}</select></label><label>Bebida<select data-birthday-beverage>${productOptions}</select></label><div class="form-grid-2"><label>Cantidad<select data-birthday-quantity>${Array.from({ length: 20 }, (_, index) => `<option value="${index + 1}">${index + 1}</option>`).join('')}</select></label><label>Medio de pago<select data-birthday-payment><option value="cash">Efectivo</option><option value="mercadopago">Mercado Pago</option><option value="transfer">Transferencia</option><option value="debit">Débito</option><option value="credit">Crédito</option><option value="other">Otro</option></select></label></div><button type="button" class="primary-button full" data-offline-birthday>Guardar 50% OFF</button></div></details>` : ''}
       </section>`;
     const payment = operationArea.querySelector('[data-offline-payment]');
@@ -139,15 +139,68 @@
     operationArea.querySelector('[data-offline-birthday]')?.addEventListener('click', () => queueQuickSale({ sale_kind: 'birthday_discount', birthday_promoter_id: operationArea.querySelector('[data-birthday-promoter]').value, beverage_id: operationArea.querySelector('[data-birthday-beverage]').value, quantity: operationArea.querySelector('[data-birthday-quantity]').value, payment_method: operationArea.querySelector('[data-birthday-payment]').value }));
   };
 
+  const appendAdminExpense = () => {
+    operationArea.insertAdjacentHTML('beforeend', `
+      <section class="card offline-controls-card">
+        <div class="section-heading compact"><div><p class="eyebrow">GASTOS OFFLINE</p><h2>Agregar gasto</h2><p class="muted">Se guarda en este dispositivo y se suma al cierre cuando sincronice.</p></div></div>
+        <div class="stack-form">
+          <label>Descripción<input data-offline-expense-description maxlength="180" placeholder="Ej.: hielo, seguridad, proveedor..."></label>
+          <label>Monto<input data-offline-expense-amount inputmode="decimal" placeholder="0"></label>
+          <label>Medio de pago<select data-offline-expense-payment><option value="cash">Efectivo</option><option value="mercadopago">Mercado Pago</option><option value="transfer">Transferencia</option><option value="debit">Débito</option><option value="credit">Crédito</option><option value="other">Otro</option></select></label>
+          <button type="button" class="primary-button full" data-offline-expense>Guardar gasto</button>
+        </div>
+      </section>`);
+    operationArea.querySelector('[data-offline-expense]')?.addEventListener('click', async () => {
+      const description = operationArea.querySelector('[data-offline-expense-description]')?.value.trim() || '';
+      const amount = operationArea.querySelector('[data-offline-expense-amount]')?.value.trim() || '';
+      const payment_method = operationArea.querySelector('[data-offline-expense-payment]')?.value || 'cash';
+      if (description.length < 2 || !amount) {
+        window.FlokiOffline.toast('Completá descripción y monto del gasto.', 'error');
+        return;
+      }
+      try {
+        await window.FlokiOffline.queueOperation('expense', { description, amount, payment_method });
+        operationArea.querySelector('[data-offline-expense-description]').value = '';
+        operationArea.querySelector('[data-offline-expense-amount]').value = '';
+        window.FlokiOffline.toast(navigator.onLine ? 'Gasto guardado. Sincronizando…' : 'Gasto guardado en este dispositivo.');
+        if (navigator.onLine) await window.FlokiOffline.syncPending({ silent: false, refresh: true });
+      } catch (error) {
+        window.FlokiOffline.toast(error.message || 'No se pudo guardar el gasto', 'error');
+      }
+    });
+  };
+
+  const renderAdminMode = async (bootstrap) => {
+    if (adminMode === 'beverages') renderBeverages(bootstrap);
+    else if (adminMode === 'expenses') { operationArea.innerHTML = ''; appendAdminExpense(); }
+    else await renderTicketing(bootstrap);
+
+    operationArea.insertAdjacentHTML('afterbegin', `
+      <section class="card offline-admin-switcher">
+        <div class="section-heading compact"><div><p class="eyebrow">ADMINISTRACIÓN OFFLINE</p><h2>Elegí el panel</h2></div></div>
+        <div class="button-row">
+          <button type="button" class="${adminMode === 'ticketing' ? 'primary-button' : 'secondary-button'}" data-admin-offline-mode="ticketing">Boletería</button>
+          <button type="button" class="${adminMode === 'beverages' ? 'primary-button' : 'secondary-button'}" data-admin-offline-mode="beverages">Bebidas</button>
+          <button type="button" class="${adminMode === 'expenses' ? 'primary-button' : 'secondary-button'}" data-admin-offline-mode="expenses">Gastos</button>
+        </div>
+        <p class="muted compact-copy">Configuración, importaciones, stock final y cierre de caja requieren conexión. Primero sincronizá todos los pendientes.</p>
+      </section>`);
+    operationArea.querySelectorAll('[data-admin-offline-mode]').forEach((button) => button.addEventListener('click', async () => {
+      adminMode = button.dataset.adminOfflineMode || 'ticketing';
+      await renderAdminMode(bootstrap);
+    }));
+  };
+
   const renderOperations = async (bootstrap) => {
     renderHeader(bootstrap);
     if (!bootstrap?.cash_session) { operationArea.innerHTML = ''; return; }
     const sector = bootstrap.user?.sector;
-    if (bootstrap.user?.role === 'admin' || sector === 'ticketing') await renderTicketing(bootstrap);
-    if (sector === 'beverages') renderBeverages(bootstrap);
     if (bootstrap.user?.role === 'admin') {
-      operationArea.insertAdjacentHTML('beforeend', '<section class="card offline-admin-note"><p class="eyebrow">ADMINISTRACIÓN</p><h2>Modo operativo limitado</h2><p class="muted">Para evitar conflictos, el modo offline del administrador muestra boletería. Configuración, stock, importaciones y cierre requieren conexión.</p></section>');
+      await renderAdminMode(bootstrap);
+      return;
     }
+    if (sector === 'ticketing') await renderTicketing(bootstrap);
+    if (sector === 'beverages') renderBeverages(bootstrap);
   };
 
   const renderConflicts = async () => {

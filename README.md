@@ -1,8 +1,6 @@
-# Floki Manager v2.8 · Stock y dashboard simplificado
+# Floki Manager v2.10.0 · Offline Seguro
 
-Esta versión parte de la base estable v2.7 y simplifica el trabajo diario: agrega una planilla oficial de stock descargable/reimportable, un conteo más claro, rendimiento aproximado configurable por bebida y un dashboard administrativo más directo.
-
-> El modo Offline Seguro Etapa 1 se conserva: no cachea páginas ni dashboards y solo prepara operaciones locales después de que la interfaz ya cargó.
+Esta versión parte de la base estable v2.9.10 y recupera el funcionamiento sin internet con una arquitectura más segura: el Service Worker cachea únicamente un shell operativo y recursos estáticos, nunca dashboards, login, reportes ni datos privados.
 
 
 Esta versión mantiene PostgreSQL, Railway, la PWA instalable y los banners dinámicos de eventos, y agrega una **cola local de operaciones** para continuar trabajando durante cortes temporales de internet.
@@ -19,7 +17,8 @@ Pueden registrarse sin conexión:
 - bebida especial con comentario;
 - BENEFICIO RRPP;
 - 50% OFF de cumpleaños, sujeto a validación al sincronizar;
-- confirmación de personas cargadas en listas RRPP, PROMOS, cumpleaños o Lista común.
+- confirmación de personas cargadas en listas RRPP, PROMOS, cumpleaños o Lista común;
+- gastos del evento desde el usuario administrador.
 
 Cada operación recibe un identificador único. Cuando vuelve internet, se envía a PostgreSQL y el servidor evita que se registre dos veces aunque el dispositivo reintente.
 
@@ -95,13 +94,13 @@ data/floki.db
 
 ## Railway y PostgreSQL
 
-La v2.6 actualiza automáticamente el esquema y agrega la tabla `offline_operations`. No hay que borrar PostgreSQL ni crear otro proyecto.
+La tabla `offline_operations` ya existe desde versiones anteriores. La v2.10.0 reutiliza esa estructura y no requiere borrar PostgreSQL ni crear otro proyecto.
 
 Para actualizar:
 
 ```bash
 git add .
-git commit -m "Floki Manager v2.6 Offline First"
+git commit -m "Floki Manager v2.10.0 Offline Seguro"
 git push
 ```
 
@@ -118,7 +117,7 @@ Debe indicar:
 ```json
 {
   "status": "ok",
-  "version": "2.6.0",
+  "version": "2.10.0",
   "database": "postgresql"
 }
 ```

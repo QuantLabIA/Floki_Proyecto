@@ -68,7 +68,7 @@ DATA_DIR = BASE_DIR / "data"
 BACKUP_DIR = BASE_DIR / "backups"
 DATABASE = DATA_DIR / "floki.db"
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
-APP_VERSION = "2.9.9"
+APP_VERSION = "2.10.0"
 ARGENTINA_TZ = ZoneInfo("America/Argentina/Buenos_Aires")
 
 PAYMENT_METHODS = {"cash", "mercadopago", "transfer", "debit", "credit", "other"}
@@ -2191,6 +2191,35 @@ def register_quick_sale():
     return redirect(url_for("dashboard"))
 
 
+def perform_expense(db, cash, user, payload, *, created_at=None):
+    """Registra un gasto usando la misma validación online/offline."""
+    if user["role"] != "admin":
+        raise PermissionError("Solo el administrador puede registrar gastos")
+    description = str(payload.get("description", "")).strip()
+    if len(description) < 2:
+        raise ValueError("Escribí una descripción")
+    total = money_to_float(payload.get("amount"))
+    if total <= 0:
+        raise ValueError("El gasto debe ser mayor a cero")
+    payment_method = str(payload.get("payment_method", "cash"))
+    if payment_method not in PAYMENT_METHODS:
+        raise ValueError("Medio de pago inválido")
+    operation_dt = operation_datetime(created_at)
+    cursor = db.execute(
+        """
+        INSERT INTO movements(cash_session_id, movement_type, category, sector, description, quantity, unit_price, total, payment_method, created_at, created_by)
+        VALUES (?, 'expense', 'expense', 'admin', ?, 1, ?, ?, ?, ?, ?)
+        """,
+        (cash["id"], description[:180], total, total, payment_method, argentina_time_iso(operation_dt), user["id"]),
+    )
+    return {
+        "movement_id": cursor.lastrowid,
+        "message": f"Gasto registrado: {description[:180]} · {total:.2f}",
+        "description": description[:180],
+        "total": total,
+    }
+
+
 @app.post("/movements/expense")
 @admin_required
 def register_expense():
@@ -2198,26 +2227,22 @@ def register_expense():
     if not cash:
         flash("Primero tenés que abrir una caja.", "error")
         return redirect(url_for("dashboard") + "#gastos-panel")
+    db = get_db()
     try:
-        description = request.form.get("description", "").strip()
-        if len(description) < 2:
-            raise ValueError("Escribí una descripción")
-        total = money_to_float(request.form.get("amount"))
-        payment_method = request.form.get("payment_method", "cash")
-        if payment_method not in PAYMENT_METHODS:
-            raise ValueError("Medio de pago inválido")
-    except ValueError as exc:
+        perform_expense(db, cash, g.user, request.form)
+        db.commit()
+    except PermissionError:
+        db.rollback()
+        abort(403)
+    except (ValueError, TypeError) as exc:
+        db.rollback()
         flash(f"No se pudo registrar el gasto: {exc}", "error")
         return redirect(url_for("dashboard") + "#gastos-panel")
-
-    get_db().execute(
-        """
-        INSERT INTO movements(cash_session_id, movement_type, category, sector, description, quantity, unit_price, total, payment_method, created_at, created_by)
-        VALUES (?, 'expense', 'expense', 'admin', ?, 1, ?, ?, ?, ?, ?)
-        """,
-        (cash["id"], description[:180], total, total, payment_method, now_iso(), g.user["id"]),
-    )
-    get_db().commit()
+    except Exception:
+        db.rollback()
+        app.logger.exception("Error registrando gasto")
+        flash("No se pudo registrar el gasto. Probá nuevamente.", "error")
+        return redirect(url_for("dashboard") + "#gastos-panel")
     flash("Gasto registrado.", "success")
     return redirect(url_for("dashboard") + "#gastos-panel")
 
@@ -4208,6 +4233,8 @@ def offline_sync():
             elif operation_type == "guest_checkin":
                 guest_id = positive_int(payload.get("guest_id"), "La persona", maximum=1000000)
                 result = perform_guest_checkin(db, cash, g.user, guest_id, created_at=client_created_at)
+            elif operation_type == "expense":
+                result = perform_expense(db, cash, g.user, payload, created_at=client_created_at)
             else:
                 raise ValueError("Tipo de operación offline no compatible")
             db.execute(
@@ -4320,8 +4347,8 @@ def diagnostic():
         "database": "postgresql" if db.is_postgres else "sqlite",
         "user": {"id": g.user["id"], "username": g.user["username"], "role": g.user["role"], "sector": g.user["sector"]},
         "checks": checks,
-        "offline_safe_stage": 0,
-        "offline_temporarily_disabled": True,
+        "offline_safe_stage": 2,
+        "offline_temporarily_disabled": False,
     }), (200 if ok else 500)
 
 

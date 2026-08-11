@@ -61,19 +61,16 @@ document.querySelectorAll('[data-quick-category]').forEach((button) => {
 updateSaleFields();
 
 setTimeout(() => document.querySelectorAll('.flash').forEach((element) => element.remove()), 4500);
-// v2.8.5: modo estable online. Voucher RRPP fijo en $0 y una sola consumición.
-// Desregistramos cualquier Service Worker anterior y limpiamos sólo cachés de Floki.
-// NO borramos IndexedDB para no perder posibles operaciones pendientes de pruebas anteriores.
+// v2.10.0: PWA Offline Seguro.
+// El Service Worker sólo conserva un shell operativo y recursos estáticos.
+// Nunca cachea dashboard, login, reportes, APIs ni respuestas privadas.
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', async () => {
     try {
-      const registrations = await navigator.serviceWorker.getRegistrations();
-      await Promise.all(registrations.map((registration) => registration.unregister()));
-      if ('caches' in window) {
-        const keys = await caches.keys();
-        await Promise.all(keys.filter((key) => key.startsWith('floki-manager-')).map((key) => caches.delete(key)));
-      }
-    } catch (_) { /* Floki funciona 100% online sin Service Worker. */ }
+      await navigator.serviceWorker.register('/service-worker.js?v=2.10.0', { scope: '/' });
+    } catch (_) {
+      // La aplicación online sigue funcionando aunque el navegador no permita Service Worker.
+    }
   }, { once: true });
 }
 

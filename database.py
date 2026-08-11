@@ -209,11 +209,27 @@ def split_sql_script(script: str) -> Iterator[str]:
 
 
 def replace_qmark_placeholders(sql: str) -> str:
+    """Adapta SQL histórico de SQLite al formato de psycopg.
+
+    Además de convertir ``?`` en ``%s``, duplica cualquier ``%`` que ya
+    exista en el SQL. psycopg reserva ese carácter para placeholders, por lo
+    que patrones legítimos como ``LIKE '%speed%'`` deben llegar como
+    ``LIKE '%%speed%%'``. Al ejecutar la consulta psycopg vuelve a enviarlos
+    a PostgreSQL como porcentajes SQL normales.
+    """
     output: list[str] = []
     quote: str | None = None
     index = 0
     while index < len(sql):
         char = sql[index]
+
+        # Debe hacerse también dentro de literales SQL: el problema ocurre
+        # precisamente con patrones LIKE '%...%'.
+        if char == "%":
+            output.append("%%")
+            index += 1
+            continue
+
         if quote:
             output.append(char)
             if char == quote:

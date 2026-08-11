@@ -27,6 +27,22 @@ class DatabaseLayerTests(unittest.TestCase):
         self.assertNotIn('?', sql)
         self.assertTrue(returns_id)
 
+
+    def test_postgres_like_percent_is_escaped(self):
+        sql, _ = translate_postgres_sql(
+            "SELECT * FROM beverage_products WHERE active=1 AND lower(name) LIKE '%speed%'",
+            append_returning=False,
+        )
+        self.assertIn("LIKE '%%speed%%'", sql)
+
+    def test_close_cash_list_cleanup_query_is_postgres_safe(self):
+        sql, _ = translate_postgres_sql(
+            "UPDATE movements SET description='Ingreso por lista' WHERE cash_session_id=? AND category='free' AND description LIKE 'Lista:%'",
+            append_returning=False,
+        )
+        self.assertIn("cash_session_id=%s", sql)
+        self.assertIn("LIKE 'Lista:%%'", sql)
+
     def test_nocase_and_date_translation(self):
         sql, _ = translate_postgres_sql(
             'SELECT * FROM cash_sessions WHERE date(event_date)>=date(?) ORDER BY event_name COLLATE NOCASE',

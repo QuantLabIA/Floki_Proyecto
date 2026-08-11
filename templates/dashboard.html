@@ -242,7 +242,7 @@
     <div><p class="eyebrow">GASTOS DEL EVENTO</p><h2>Agregar gasto</h2><p class="muted compact-copy">Registrá acá cualquier salida de dinero de la noche. Se descuenta automáticamente del resultado final.</p></div>
     <span class="muted">Se incluyen automáticamente en el cierre</span>
   </div>
-  <form action="{{ url_for('register_expense') }}" method="post" class="expense-quick-form">
+  <form action="{{ url_for('register_expense') }}" method="post" class="expense-quick-form" data-offline-operation="expense">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <label>Descripción<input name="description" maxlength="180" required placeholder="Ej.: hielo, seguridad, proveedor..."></label>
     <label>Monto<input name="amount" inputmode="decimal" required placeholder="0"></label>

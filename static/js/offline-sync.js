@@ -284,8 +284,10 @@
     const explicit = form.dataset.offlineOperation;
     if (explicit === 'quick_sale') return { type: 'quick_sale', payload: formPayload(form) };
     if (explicit === 'guest_checkin') return { type: 'guest_checkin', payload: { guest_id: form.dataset.guestId } };
+    if (explicit === 'expense') return { type: 'expense', payload: formPayload(form) };
     const action = new URL(form.action, window.location.href).pathname;
     if (action === '/movements/quick-sale') return { type: 'quick_sale', payload: formPayload(form) };
+    if (action === '/movements/expense') return { type: 'expense', payload: formPayload(form) };
     const match = action.match(/^\/promoter-lists\/(\d+)\/check-in$/);
     if (match) return { type: 'guest_checkin', payload: { guest_id: match[1] } };
     return null;
@@ -314,7 +316,12 @@
         setTimeout(() => button.classList.remove('queued-pulse'), 900);
       });
       if (!navigator.onLine) {
-        toast(supported.type === 'guest_checkin' ? 'Ingreso guardado en este dispositivo. Se sincronizará al volver internet.' : 'Venta guardada sin conexión. Se sincronizará automáticamente.');
+        const offlineMessage = supported.type === 'guest_checkin'
+          ? 'Ingreso guardado en este dispositivo. Se sincronizará al volver internet.'
+          : (supported.type === 'expense'
+            ? 'Gasto guardado en este dispositivo. Se sincronizará al volver internet.'
+            : 'Venta guardada sin conexión. Se sincronizará automáticamente.');
+        toast(offlineMessage);
         return;
       }
       await syncPending({ silent: true, refresh: false });
@@ -368,6 +375,20 @@
       const summary = await syncPending({ silent: false, refresh: true });
       reloadAfterApplied(summary);
     } catch (error) { /* Indicador principal ya muestra conexión. */ }
+  });
+
+  const syncWhenActive = async () => {
+    if (!navigator.onLine || document.visibilityState === 'hidden') return;
+    try {
+      const summary = await syncPending({ silent: true, refresh: true });
+      reloadAfterApplied(summary);
+    } catch (_) {
+      // La cola permanece local hasta que haya conexión y sesión válidas.
+    }
+  };
+  window.addEventListener('focus', syncWhenActive);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') syncWhenActive();
   });
 
   window.FlokiOffline = {
