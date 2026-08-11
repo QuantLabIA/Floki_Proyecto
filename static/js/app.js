@@ -436,3 +436,22 @@ if (ajaxPriceSettingsForm) {
     }
   });
 }
+
+// Floki Manager v2.9.4 · Casilleros para importar stock/gastos del evento anterior.
+const previousEventImport = document.querySelector('[data-previous-event-import]');
+if (previousEventImport) {
+  previousEventImport.querySelectorAll('[data-import-master]').forEach((master) => {
+    const groupName = master.dataset.importMaster;
+    const items = previousEventImport.querySelector(`[data-import-items="${groupName}"]`);
+    const children = items ? Array.from(items.querySelectorAll('input[type="checkbox"]')) : [];
+
+    const refreshImportGroup = () => {
+      children.forEach((child) => {
+        child.disabled = !master.checked;
+      });
+    };
+
+    master.addEventListener('change', refreshImportGroup);
+    refreshImportGroup();
+  });
+}

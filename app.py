@@ -68,7 +68,7 @@ DATA_DIR = BASE_DIR / "data"
 BACKUP_DIR = BASE_DIR / "backups"
 DATABASE = DATA_DIR / "floki.db"
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
-APP_VERSION = "2.9.3"
+APP_VERSION = "2.9.4"
 ARGENTINA_TZ = ZoneInfo("America/Argentina/Buenos_Aires")
 
 PAYMENT_METHODS = {"cash", "mercadopago", "transfer", "debit", "credit", "other"}
@@ -1422,15 +1422,16 @@ def promoter_totals(cash_session_id):
     ).fetchall()
 
 
-def ensure_beverage_in_event_stock(db, cash_session_id, product, user_id):
-    previous = db.execute(
-        """SELECT bs.final_quantity FROM beverage_stock bs
-           JOIN cash_sessions cs ON cs.id=bs.cash_session_id
-           WHERE bs.beverage_id=? AND bs.final_quantity IS NOT NULL AND cs.id<>?
-           ORDER BY cs.id DESC LIMIT 1""",
-        (product["id"], cash_session_id),
-    ).fetchone()
-    suggested = int(previous["final_quantity"]) if previous else 0
+def ensure_beverage_in_event_stock(db, cash_session_id, product, user_id, initial_quantity=0):
+    """Asegura la fila de stock sin arrastrar datos históricos por sorpresa.
+
+    Desde v2.9.4 el stock del evento anterior solo se copia cuando el administrador
+    lo marca explícitamente al crear la nueva jornada.
+    """
+    try:
+        suggested = max(0, int(float(initial_quantity or 0)))
+    except (TypeError, ValueError):
+        suggested = 0
     db.execute(
         """INSERT OR IGNORE INTO beverage_stock(cash_session_id, beverage_id, beverage_name, initial_quantity, final_quantity, updated_at, updated_by)
            VALUES (?, ?, ?, ?, NULL, ?, ?)""",
@@ -1442,10 +1443,45 @@ def ensure_beverage_in_event_stock(db, cash_session_id, product, user_id):
     )
 
 
-def initialize_event_stock(db, cash_session_id, user_id):
+def initialize_event_stock(db, cash_session_id, user_id, initial_quantities=None):
+    initial_quantities = initial_quantities or {}
     products = db.execute("SELECT * FROM beverage_products WHERE active=1 ORDER BY name COLLATE NOCASE").fetchall()
     for product in products:
-        ensure_beverage_in_event_stock(db, cash_session_id, product, user_id)
+        ensure_beverage_in_event_stock(
+            db, cash_session_id, product, user_id,
+            initial_quantities.get(int(product["id"]), 0),
+        )
+
+
+def previous_event_import_options(db):
+    """Devuelve inventario final y gastos del último evento cerrado para importación selectiva."""
+    previous_event = db.execute(
+        """SELECT id, event_name, event_date, closed_at
+           FROM cash_sessions
+           WHERE status='closed'
+           ORDER BY COALESCE(closed_at, opened_at) DESC, id DESC
+           LIMIT 1"""
+    ).fetchone()
+    if not previous_event:
+        return None, [], []
+
+    stock_rows = db.execute(
+        """SELECT bs.beverage_id, bs.beverage_name, bs.final_quantity,
+                  bp.stock_unit, bp.active
+           FROM beverage_stock bs
+           LEFT JOIN beverage_products bp ON bp.id=bs.beverage_id
+           WHERE bs.cash_session_id=? AND bs.final_quantity IS NOT NULL AND COALESCE(bp.active, 0)=1
+           ORDER BY bs.beverage_name COLLATE NOCASE""",
+        (previous_event["id"],),
+    ).fetchall()
+    expense_rows = db.execute(
+        """SELECT id, description, total, payment_method
+           FROM movements
+           WHERE cash_session_id=? AND movement_type='expense' AND voided=0
+           ORDER BY id ASC""",
+        (previous_event["id"],),
+    ).fetchall()
+    return previous_event, stock_rows, expense_rows
 
 
 def event_stock_rows(cash_session_id):
@@ -1682,6 +1718,9 @@ def dashboard():
         totals = by_payment = movements = promoter_summary = None
         beverage_progress = []
         expected_total = occupancy_percent = guest_pending = stock_pending = 0
+    previous_event = previous_stock = previous_expenses = None
+    if not cash and g.user["role"] == "admin":
+        previous_event, previous_stock, previous_expenses = previous_event_import_options(get_db())
     return render_template(
         "dashboard.html", cash=cash, totals=totals, by_payment=by_payment, movements=movements,
         expected_total=expected_total, promoters=active_promoters, entry_prices=entry_prices, beverages=beverages, beverage_groups=beverage_groups,
@@ -1691,6 +1730,7 @@ def dashboard():
         birthday_discount_open=birthday_discount_available(),
         birthday_discount_cutoff_label=BIRTHDAY_DISCOUNT_CUTOFF_LABEL,
         birthday_gift_min_checkins=BIRTHDAY_GIFT_MIN_CHECKINS,
+        previous_event=previous_event, previous_stock=previous_stock or [], previous_expenses=previous_expenses or [],
     )
 
 
@@ -1716,19 +1756,74 @@ def open_cash():
         flash(str(exc), "error")
         return redirect(url_for("dashboard"))
     db = get_db()
-    cursor = db.execute(
-        """INSERT INTO cash_sessions(
-               opened_at, opened_by, opening_amount, status, event_name, event_date, capacity,
-               event_image_data, event_image_mime, event_image_name
-           ) VALUES (?, ?, ?, 'open', ?, ?, ?, ?, ?, ?)""",
-        (
-            now_iso(), g.user["id"], opening_amount, event_name, event_date, capacity,
-            event_image_data, event_image_mime, event_image_name,
-        ),
-    )
-    initialize_event_stock(db, cursor.lastrowid, g.user["id"])
-    db.commit()
-    flash("Evento y caja creados correctamente.", "success")
+    previous_event, previous_stock, previous_expenses = previous_event_import_options(db)
+    source_event_id = int(previous_event["id"]) if previous_event else None
+
+    import_stock = request.form.get("import_previous_stock") == "1"
+    import_expenses = request.form.get("import_previous_expenses") == "1"
+    selected_stock_ids = {
+        int(value) for value in request.form.getlist("previous_stock_ids") if str(value).isdigit()
+    }
+    selected_expense_ids = {
+        int(value) for value in request.form.getlist("previous_expense_ids") if str(value).isdigit()
+    }
+
+    stock_initials = {}
+    if import_stock and source_event_id:
+        for row in previous_stock:
+            beverage_id = int(row["beverage_id"])
+            if beverage_id in selected_stock_ids and row["final_quantity"] is not None:
+                stock_initials[beverage_id] = max(0, int(float(row["final_quantity"] or 0)))
+
+    imported_expenses = []
+    if import_expenses and source_event_id:
+        for row in previous_expenses:
+            if int(row["id"]) in selected_expense_ids:
+                imported_expenses.append(row)
+
+    try:
+        cursor = db.execute(
+            """INSERT INTO cash_sessions(
+                   opened_at, opened_by, opening_amount, status, event_name, event_date, capacity,
+                   event_image_data, event_image_mime, event_image_name
+               ) VALUES (?, ?, ?, 'open', ?, ?, ?, ?, ?, ?)""",
+            (
+                now_iso(), g.user["id"], opening_amount, event_name, event_date, capacity,
+                event_image_data, event_image_mime, event_image_name,
+            ),
+        )
+        new_session_id = cursor.lastrowid
+        initialize_event_stock(db, new_session_id, g.user["id"], stock_initials)
+
+        for expense in imported_expenses:
+            total = float(expense["total"] or 0)
+            db.execute(
+                """INSERT INTO movements(
+                       cash_session_id, movement_type, category, sector, description,
+                       quantity, unit_price, total, payment_method, created_at, created_by
+                   ) VALUES (?, 'expense', 'expense', 'admin', ?, 1, ?, ?, ?, ?, ?)""",
+                (
+                    new_session_id,
+                    (expense["description"] or "Gasto importado")[:180],
+                    total, total,
+                    expense["payment_method"] if expense["payment_method"] in PAYMENT_METHODS else "cash",
+                    now_iso(), g.user["id"],
+                ),
+            )
+        db.commit()
+    except Exception:
+        db.rollback()
+        app.logger.exception("No se pudo crear el evento con importación selectiva")
+        flash("No se pudo crear el evento. No se guardó ningún dato; probá nuevamente.", "error")
+        return redirect(url_for("dashboard"))
+
+    parts = []
+    if import_stock:
+        parts.append(f"{len(stock_initials)} ítems de stock")
+    if import_expenses:
+        parts.append(f"{len(imported_expenses)} gastos")
+    imported_copy = f" Se importaron {', '.join(parts)} del evento anterior." if parts else ""
+    flash(f"Evento y caja creados correctamente.{imported_copy}", "success")
     return redirect(url_for("dashboard"))
 
 

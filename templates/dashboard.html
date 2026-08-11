@@ -26,6 +26,60 @@
         <label>Monto inicial opcional<input inputmode="decimal" name="opening_amount" placeholder="Vacío = $0"></label>
         <label>Capacidad opcional<input inputmode="numeric" type="number" min="0" max="10000" name="capacity" placeholder="Sin límite declarado"></label>
       </div>
+
+      {% if previous_event %}
+      <section class="previous-event-import" data-previous-event-import>
+        <div class="previous-event-import-heading">
+          <div>
+            <p class="eyebrow">IMPORTAR DEL EVENTO ANTERIOR</p>
+            <h3>{{ previous_event['event_name'] }}</h3>
+            <small>{{ previous_event['event_date']|date_ar }} · elegí solamente lo que querés reutilizar</small>
+          </div>
+        </div>
+
+        <div class="previous-import-groups">
+          <article class="previous-import-group">
+            <label class="import-master-check">
+              <input type="checkbox" name="import_previous_stock" value="1" data-import-master="stock" {% if not previous_stock %}disabled{% endif %}>
+              <span><strong>Inventario / stock</strong><small>El stock final seleccionado pasa a ser el stock inicial del evento nuevo.</small></span>
+            </label>
+            {% if previous_stock %}
+            <div class="import-items" data-import-items="stock">
+              {% for item in previous_stock %}
+              <label class="import-item-check">
+                <input type="checkbox" name="previous_stock_ids" value="{{ item['beverage_id'] }}" checked>
+                <span><strong>{{ item['beverage_name'] }}</strong><small>Quedaron {{ item['final_quantity'] }} {{ item['stock_unit'] or 'unidades' }}</small></span>
+              </label>
+              {% endfor %}
+            </div>
+            {% else %}
+            <p class="muted compact-copy import-empty">El evento anterior no tiene stock final cargado.</p>
+            {% endif %}
+          </article>
+
+          <article class="previous-import-group">
+            <label class="import-master-check">
+              <input type="checkbox" name="import_previous_expenses" value="1" data-import-master="expenses" {% if not previous_expenses %}disabled{% endif %}>
+              <span><strong>Gastos</strong><small>Podés copiar gastos habituales y destildar los que no correspondan esta noche.</small></span>
+            </label>
+            {% if previous_expenses %}
+            <div class="import-items" data-import-items="expenses">
+              {% for expense in previous_expenses %}
+              <label class="import-item-check">
+                <input type="checkbox" name="previous_expense_ids" value="{{ expense['id'] }}" checked>
+                <span><strong>{{ expense['description'] or 'Gasto' }}</strong><small>{{ expense['total']|money }} · {{ payment_labels.get(expense['payment_method'], expense['payment_method']) }}</small></span>
+              </label>
+              {% endfor %}
+            </div>
+            {% else %}
+            <p class="muted compact-copy import-empty">El evento anterior no tiene gastos para copiar.</p>
+            {% endif %}
+          </article>
+        </div>
+        <p class="previous-import-note">Ventas, tickets, beneficios, vouchers y listas <strong>no se importan</strong>. Cada evento conserva su historial separado.</p>
+      </section>
+      {% endif %}
+
       <button class="primary-button full" type="submit">Crear evento y abrir caja</button>
     </form>
   </div>

@@ -1547,3 +1547,77 @@ body.app-page .admin-quick-tabs {
   .expense-quick-form { grid-template-columns: 1fr; }
   .expense-quick-form label:first-of-type { grid-column: auto; }
 }
+
+/* Floki Manager v2.9.4 · Importación selectiva desde el evento anterior */
+.previous-event-import {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid rgba(181, 92, 255, .28);
+  border-radius: 18px;
+  background: linear-gradient(180deg, rgba(160, 55, 255, .08), rgba(255,255,255,.018));
+}
+.previous-event-import-heading h3 { margin: 2px 0 3px; font-size: 1.08rem; }
+.previous-event-import-heading small { color: var(--muted); }
+.previous-import-groups { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.previous-import-group {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,.085);
+  border-radius: 15px;
+  background: rgba(7, 6, 12, .48);
+}
+.import-master-check,
+.import-item-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  cursor: pointer;
+}
+.import-master-check {
+  padding: 14px;
+  border-bottom: 1px solid rgba(255,255,255,.065);
+}
+.import-master-check input,
+.import-item-check input {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  margin: 1px 0 0;
+  accent-color: #c461ff;
+}
+.import-master-check span,
+.import-item-check span { display: grid; gap: 3px; min-width: 0; }
+.import-master-check strong { color: #fff; font-size: .93rem; }
+.import-master-check small,
+.import-item-check small { color: var(--muted); line-height: 1.35; }
+.import-items {
+  display: grid;
+  gap: 0;
+  max-height: 245px;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.import-item-check {
+  padding: 10px 14px;
+  border-bottom: 1px solid rgba(255,255,255,.045);
+}
+.import-item-check:last-child { border-bottom: 0; }
+.import-item-check strong { font-size: .82rem; color: #f8f4fb; overflow-wrap: anywhere; }
+.import-item-check:has(input:disabled) { opacity: .48; cursor: default; }
+.import-empty { padding: 12px 14px; margin: 0; }
+.previous-import-note {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(255,255,255,.035);
+  color: var(--muted);
+  font-size: .78rem;
+  line-height: 1.45;
+}
+.previous-import-note strong { color: #f1ddff; }
+@media (max-width: 760px) {
+  .previous-import-groups { grid-template-columns: 1fr; }
+  .previous-event-import { padding: 12px; }
+  .import-items { max-height: 210px; }
+}
