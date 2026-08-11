@@ -68,7 +68,7 @@ DATA_DIR = BASE_DIR / "data"
 BACKUP_DIR = BASE_DIR / "backups"
 DATABASE = DATA_DIR / "floki.db"
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
-APP_VERSION = "2.9.1"
+APP_VERSION = "2.9.3"
 ARGENTINA_TZ = ZoneInfo("America/Argentina/Buenos_Aires")
 
 PAYMENT_METHODS = {"cash", "mercadopago", "transfer", "debit", "credit", "other"}
@@ -457,36 +457,87 @@ def find_speed_product(db):
 
 
 def add_champagne_speed_stock(db, cash, user, parent_movement_id, champagne_product, champagne_quantity, *, promoter_id=None, created_at=None):
-    """Registra los 2 Speed por Champagne como ajuste de stock, no como otra venta.
+    """Descuenta los 2 Speed incluidos sin poner en riesgo la venta principal.
 
-    Desde v2.9.0 el acompañamiento de Champagne deja de insertarse en ``movements``.
-    Una venta de Champagne es un único ticket monetario y los 2 Speed son un componente
-    automático de stock. Esto evita que PostgreSQL tenga que crear un segundo movimiento
-    de venta y mantiene el historial de Caja de Bebidas limpio.
+    v2.9.3 endurece este punto para PostgreSQL/Railway. Primero intenta guardar el
+    componente en ``beverage_stock_adjustments``. Si esa escritura falla por una
+    diferencia de esquema o una incidencia puntual de PostgreSQL, revierte SOLO ese
+    componente mediante SAVEPOINT y usa el formato histórico ``champagne_speed`` en
+    ``movements``. Ese movimiento vale $0, queda vinculado a la venta principal y ya
+    está excluido de tickets, recaudación y ranking de bebidas pagas.
+
+    De esta forma: 1 Champagne = 1 ticket y 1 venta paga, pero el stock sigue
+    descontando 2 Speed. Una falla secundaria de stock nunca vuelve a borrar el cobro
+    del Champagne.
     """
     if not is_champagne_product(champagne_product):
-        return None
+        return "not_champagne"
     speed = find_speed_product(db)
     if not speed:
-        return None
+        return "missing_speed"
     speed_quantity = int(champagne_quantity) * 2
     if speed_quantity <= 0:
-        return None
-    ensure_beverage_in_event_stock(db, cash["id"], speed, user["id"])
+        return "no_quantity"
+
     stock_units = beverage_stock_consumption(speed, speed_quantity)
-    # INSERT OR IGNORE hace la operación idempotente: si el navegador reenvía la misma
-    # venta por accidente, nunca duplica el descuento asociado al mismo movimiento padre.
-    cursor = db.execute(
-        """INSERT OR IGNORE INTO beverage_stock_adjustments(
-               cash_session_id, parent_movement_id, beverage_product_id, reason,
-               quantity, stock_units, created_at, created_by, voided
-           ) VALUES (?, ?, ?, 'champagne_speed', ?, ?, ?, ?, 0)""",
-        (
-            cash["id"], parent_movement_id, speed["id"], speed_quantity, stock_units,
-            created_at or now_iso(), user["id"],
-        ),
-    )
-    return cursor.lastrowid
+    stamp = created_at or now_iso()
+    savepoint = "floki_champagne_speed_component"
+
+    # Ruta preferida: tabla dedicada de ajustes de stock.
+    try:
+        db.execute(f"SAVEPOINT {savepoint}")
+        ensure_beverage_in_event_stock(db, cash["id"], speed, user["id"])
+        cursor = db.execute(
+            """INSERT OR IGNORE INTO beverage_stock_adjustments(
+                   cash_session_id, parent_movement_id, beverage_product_id, reason,
+                   quantity, stock_units, created_at, created_by, voided
+               ) VALUES (?, ?, ?, 'champagne_speed', ?, ?, ?, ?, 0)""",
+            (
+                cash["id"], parent_movement_id, speed["id"], speed_quantity,
+                stock_units, stamp, user["id"],
+            ),
+        )
+        db.execute(f"RELEASE SAVEPOINT {savepoint}")
+        return "adjustment" if cursor.lastrowid else "adjustment_existing"
+    except Exception:
+        app.logger.exception(
+            "No se pudo guardar el ajuste dedicado Champagne + Speed; se usará el fallback compatible"
+        )
+        try:
+            db.execute(f"ROLLBACK TO SAVEPOINT {savepoint}")
+            db.execute(f"RELEASE SAVEPOINT {savepoint}")
+        except Exception:
+            app.logger.exception("No se pudo cerrar el savepoint del ajuste Champagne + Speed")
+
+    # Fallback compatible con bases históricas. No cuenta como ticket ni ingreso.
+    fallback_savepoint = "floki_champagne_speed_fallback"
+    try:
+        db.execute(f"SAVEPOINT {fallback_savepoint}")
+        db.execute(
+            """INSERT INTO movements(
+                   cash_session_id, movement_type, category, sector, description,
+                   quantity, unit_price, total, payment_method, created_at, created_by,
+                   promoter_id, beverage_product_id, stock_units, linked_movement_id
+               ) VALUES (?, 'sale', 'champagne_speed', 'beverages', ?, ?, 0, 0, 'other', ?, ?, ?, ?, ?, ?)""",
+            (
+                cash["id"],
+                f"Speed incluido con Champagne · combo #{parent_movement_id}",
+                speed_quantity, stamp, user["id"], promoter_id, speed["id"],
+                stock_units, parent_movement_id,
+            ),
+        )
+        db.execute(f"RELEASE SAVEPOINT {fallback_savepoint}")
+        return "legacy_movement"
+    except Exception:
+        app.logger.exception(
+            "También falló el fallback de stock Champagne + Speed; se conserva la venta principal"
+        )
+        try:
+            db.execute(f"ROLLBACK TO SAVEPOINT {fallback_savepoint}")
+            db.execute(f"RELEASE SAVEPOINT {fallback_savepoint}")
+        except Exception:
+            app.logger.exception("No se pudo cerrar el savepoint fallback Champagne + Speed")
+        return "stock_warning"
 
 
 def normalize_guest_name(value):
@@ -1915,12 +1966,12 @@ def perform_quick_sale(db, cash, user, payload, *, created_at=None):
         (cash["id"], category, movement_sector, description, quantity, unit_price, total, payment_method, operation_dt.isoformat(sep=" "), user["id"], promoter_id, beverage_product_id, stock_units),
     )
     champagne_bundle = bool(product is not None and is_champagne_product(product))
-    champagne_speed_adjusted = False
+    champagne_speed_status = None
     if champagne_bundle:
-        champagne_speed_adjusted = bool(add_champagne_speed_stock(
+        champagne_speed_status = add_champagne_speed_stock(
             db, cash, user, cursor.lastrowid, product, quantity, promoter_id=promoter_id,
             created_at=operation_dt.isoformat(sep=" "),
-        ))
+        )
     messages = {
         "rrpp_benefit": f"Voucher RRPP registrado: {product['name']} × 1. Valor $0; se descontó una consumición del stock.",
         "special_beverage": f"Bebida especial registrada y asignada al stock de {product['name']}.",
@@ -1928,10 +1979,12 @@ def perform_quick_sale(db, cash, user, payload, *, created_at=None):
     }
     default_message = f"Venta rápida registrada: {description} × {quantity}."
     message = messages.get(sale_kind, default_message)
-    if champagne_bundle and champagne_speed_adjusted:
+    if champagne_bundle and champagne_speed_status in {"adjustment", "adjustment_existing", "legacy_movement"}:
         message += f" También se descontaron {quantity * 2} Speed ({2} por champagne)."
-    elif champagne_bundle:
+    elif champagne_bundle and champagne_speed_status == "missing_speed":
         message += " Champagne registrado correctamente. No había una variante Speed activa para descontar el acompañamiento; podés configurarla después en Bebidas."
+    elif champagne_bundle and champagne_speed_status == "stock_warning":
+        message += " Champagne registrado correctamente. El cobro quedó guardado, pero no se pudo registrar el descuento automático de Speed; revisalo luego desde Stock."
     return {
         "movement_id": cursor.lastrowid,
         "message": message,
