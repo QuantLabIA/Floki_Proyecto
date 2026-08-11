@@ -68,7 +68,7 @@ DATA_DIR = BASE_DIR / "data"
 BACKUP_DIR = BASE_DIR / "backups"
 DATABASE = DATA_DIR / "floki.db"
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
-APP_VERSION = "2.9.4"
+APP_VERSION = "2.9.6"
 ARGENTINA_TZ = ZoneInfo("America/Argentina/Buenos_Aires")
 
 PAYMENT_METHODS = {"cash", "mercadopago", "transfer", "debit", "credit", "other"}
@@ -90,7 +90,7 @@ SECTOR_LABELS = {"ticketing": "Caja de boletería", "beverages": "Caja de bebida
 # Categorías visibles del sector Bebidas. Las variantes existentes se agrupan
 # automáticamente sin perder su marca, nombre ni historial.
 BEVERAGE_CATEGORY_OPTIONS = (
-    "CERVEZAS", "FERNET", "VODKA", "WHISKY", "TRAGOS", "GASEOSAS", "SHOTS", "CHAMPAGNE",
+    "CERVEZAS", "FERNET", "VODKA", "WHISKY", "TRAGOS", "GASEOSAS", "SHOTS", "CHAMPAGNE", "ENERGIZANTES",
 )
 BEVERAGE_TYPE_OPTIONS = (
     "Cerveza", "Fernet", "Vodka", "Gin", "Whisky", "Ron", "Gancia",
@@ -345,7 +345,12 @@ def infer_beverage_category(beverage_type=None, brand=None, sale_unit=None, name
         return "WHISKY"
     if any(token in text for token in ("champagne", "espumante", "chandon")):
         return "CHAMPAGNE"
-    if any(token in text for token in ("gaseosa", "energizante", "agua", "coca-cola", "sprite", "fanta", "schweppes", "pepsi", "7up", "speed", "red bull", "monster", "villavicencio", "eco de los andes", "kin")):
+    # Los energizantes se muestran como grupo propio para que queden junto a Champagne
+    # en la venta rápida. Se mantienen como productos independientes: no hay combo ni
+    # descuento automático de stock entre ambos.
+    if any(token in text for token in ("energizante", "speed", "red bull", "monster")):
+        return "ENERGIZANTES"
+    if any(token in text for token in ("gaseosa", "agua", "coca-cola", "sprite", "fanta", "schweppes", "pepsi", "7up", "villavicencio", "eco de los andes", "kin")):
         return "GASEOSAS"
     return "TRAGOS"
 
@@ -367,6 +372,16 @@ def group_beverages(rows, *, product_ranking=None, category_ranking=None, sold_c
     category_order = {label: index for index, label in enumerate(BEVERAGE_CATEGORY_OPTIONS)}
     labels = [label for label in BEVERAGE_CATEGORY_OPTIONS if grouped[label]]
     labels.sort(key=lambda label: (-int(category_ranking.get(label, 0)), category_order[label]))
+
+    # Champagne y Energizantes forman una pareja visual en la venta rápida. El ranking
+    # del evento anterior sigue decidiendo dónde aparece el bloque; solo evitamos que
+    # otra categoría se meta entre ambos. Champagne queda primero y Energizantes justo
+    # después, para poder registrar manualmente 1 champagne y luego los energizantes.
+    if "CHAMPAGNE" in labels and "ENERGIZANTES" in labels:
+        pair_index = min(labels.index("CHAMPAGNE"), labels.index("ENERGIZANTES"))
+        labels = [label for label in labels if label not in {"CHAMPAGNE", "ENERGIZANTES"}]
+        labels[pair_index:pair_index] = ["CHAMPAGNE", "ENERGIZANTES"]
+
     return [{"label": label, "items": grouped[label], "previous_sold_count": int(category_ranking.get(label, 0) or 0)} for label in labels]
 
 
@@ -451,6 +466,28 @@ def find_speed_product(db):
            ORDER BY
              CASE WHEN lower(stock_unit)='lata' THEN 0 ELSE 1 END,
              CASE WHEN lower(sale_unit) LIKE 'lata%' THEN 0 ELSE 1 END,
+             sort_order, id
+           LIMIT 1"""
+    ).fetchone()
+
+
+def find_energizer_product(db):
+    """Devuelve un energizante activo para beneficios actuales.
+
+    Desde v2.9.5 Champagne y Energizante son productos independientes. Se prioriza
+    Speed si existe, pero también sirve cualquier producto configurado como Energizante.
+    """
+    return db.execute(
+        """SELECT * FROM beverage_products
+           WHERE active=1 AND (
+             lower(beverage_type) LIKE '%energizante%'
+             OR lower(brand)='speed'
+             OR lower(name) LIKE '%speed%'
+             OR lower(name) LIKE '%energizante%'
+           )
+           ORDER BY
+             CASE WHEN lower(brand)='speed' THEN 0 ELSE 1 END,
+             CASE WHEN lower(stock_unit)='lata' THEN 0 ELSE 1 END,
              sort_order, id
            LIMIT 1"""
     ).fetchone()
@@ -1485,11 +1522,11 @@ def previous_event_import_options(db):
 
 
 def event_stock_rows(cash_session_id):
-    """Stock del evento sumando ventas y ajustes automáticos de combos.
+    """Stock del evento a partir de ventas y ajustes históricos.
 
-    Los movimientos históricos ``champagne_speed`` siguen computando consumo para no
-    alterar jornadas anteriores. Desde v2.9.0 los nuevos 2 Speed incluidos se guardan
-    en ``beverage_stock_adjustments`` y no aparecen como una segunda venta.
+    Desde v2.9.5 Champagne y Energizante se registran por separado. Los antiguos
+    movimientos/ajustes ``champagne_speed`` se siguen computando únicamente para no
+    modificar el stock ni los reportes de eventos anteriores.
     """
     return get_db().execute(
         """SELECT bs.*, bp.stock_unit, bp.sale_unit, bp.servings_per_stock_unit, bp.approx_yield, bp.beverage_type, bp.brand,
@@ -1545,8 +1582,8 @@ def stock_view_rows(cash_session_id):
         approx_yield = suggested_approx_yield(item["stock_unit"], item["sale_unit"], item.get("beverage_type"), item.get("brand"), item.get("beverage_name")) if not float(item.get("approx_yield") or 0) else float(item.get("approx_yield") or 0)
         item["approx_yield"] = approx_yield
         item["category_group"] = infer_beverage_category(item.get("beverage_type"), item.get("brand"), item.get("sale_unit"), item.get("beverage_name"))
-        # El consumo estimado sale de los movimientos reales de stock. Así una venta de
-        # Champagne descuenta sus 2 Speed aunque esos Speed no sean un ticket adicional.
+        # El consumo estimado sale de los movimientos reales. Los ajustes champagne_speed
+        # que puedan existir pertenecen a eventos históricos anteriores a v2.9.5.
         item["approx_consumed"] = round(estimated_stock_consumed, 2)
         item["expected_final"] = round(initial - item["approx_consumed"], 2)
         item["difference"] = None
@@ -1997,23 +2034,22 @@ def perform_quick_sale(db, cash, user, payload, *, created_at=None):
         beverage_product_id = product["id"]
         stock_units = beverage_stock_consumption(product, quantity)
         sale_unit = product["sale_unit"] or "unidad"
-        champagne_bundle = is_champagne_product(product)
         if sale_kind == "beverage":
             category = "drink"
             unit_price = float(product["price"])
-            description = f"{product['name']} · {sale_unit}" + (" · incluye 2 Speed" if champagne_bundle else "")
+            description = f"{product['name']} · {sale_unit}"
         elif sale_kind == "special_beverage":
             category = "drink_special"
             unit_price = beverage_price_from_option(payload.get("special_price"), allow_zero=False)
             comment = str(payload.get("comment", "")).strip()[:160]
             if len(comment) < 2:
                 raise ValueError("Escribí qué se vendió en el comentario")
-            description = f"Bebida especial · {product['name']} · {sale_unit} · {comment}" + (" · incluye 2 Speed" if champagne_bundle else "")
+            description = f"Bebida especial · {product['name']} · {sale_unit} · {comment}"
         elif sale_kind == "rrpp_benefit":
             category = "rrpp_benefit"
             unit_price = 0.0
             beneficiary_comment = str(payload.get("beneficiary_comment", "")).strip()[:120]
-            description = f"VOUCHER RRPP $0 · {product['name']} · 1 {sale_unit}" + (" · incluye 2 Speed" if champagne_bundle else "")
+            description = f"VOUCHER RRPP $0 · {product['name']} · 1 {sale_unit}"
             if beneficiary_comment:
                 description += f" · Beneficiario: {beneficiary_comment}"
             payment_method = "other"
@@ -2039,7 +2075,7 @@ def perform_quick_sale(db, cash, user, payload, *, created_at=None):
                 raise ValueError("El 50% OFF se habilita cuando ingresa el cumpleañero o cumpleañera")
             category = "birthday_discount"
             unit_price = round(float(product["price"]) * 0.5, 2)
-            description = f"50% OFF CUMPLEAÑOS · {birthday['birthday_person_name']} · {product['name']} · {sale_unit}" + (" · incluye 2 Speed" if champagne_bundle else "")
+            description = f"50% OFF CUMPLEAÑOS · {birthday['birthday_person_name']} · {product['name']} · {sale_unit}"
     elif sale_kind == "ticketing_product":
         product_id = positive_int(payload.get("ticketing_product_id"), "El producto", maximum=100000)
         product = db.execute("SELECT * FROM ticketing_products WHERE id=? AND active=1", (product_id,)).fetchone()
@@ -2060,13 +2096,6 @@ def perform_quick_sale(db, cash, user, payload, *, created_at=None):
         """,
         (cash["id"], category, movement_sector, description, quantity, unit_price, total, payment_method, operation_dt.isoformat(sep=" "), user["id"], promoter_id, beverage_product_id, stock_units),
     )
-    champagne_bundle = bool(product is not None and is_champagne_product(product))
-    champagne_speed_status = None
-    if champagne_bundle:
-        champagne_speed_status = add_champagne_speed_stock(
-            db, cash, user, cursor.lastrowid, product, quantity, promoter_id=promoter_id,
-            created_at=operation_dt.isoformat(sep=" "),
-        )
     messages = {
         "rrpp_benefit": f"Voucher RRPP registrado: {product['name']} × 1. Valor $0; se descontó una consumición del stock.",
         "special_beverage": f"Bebida especial registrada y asignada al stock de {product['name']}.",
@@ -2074,12 +2103,6 @@ def perform_quick_sale(db, cash, user, payload, *, created_at=None):
     }
     default_message = f"Venta rápida registrada: {description} × {quantity}."
     message = messages.get(sale_kind, default_message)
-    if champagne_bundle and champagne_speed_status in {"adjustment", "adjustment_existing", "legacy_movement"}:
-        message += f" También se descontaron {quantity * 2} Speed ({2} por champagne)."
-    elif champagne_bundle and champagne_speed_status == "missing_speed":
-        message += " Champagne registrado correctamente. No había una variante Speed activa para descontar el acompañamiento; podés configurarla después en Bebidas."
-    elif champagne_bundle and champagne_speed_status == "stock_warning":
-        message += " Champagne registrado correctamente. El cobro quedó guardado, pero no se pudo registrar el descuento automático de Speed; revisalo luego desde Stock."
     return {
         "movement_id": cursor.lastrowid,
         "message": message,
@@ -2432,7 +2455,7 @@ def create_birthday_list():
         )
     db.commit()
     flash(
-        f"Cumpleaños confirmado para {birthday_name}: FREE para la persona y hasta 9 amigos hasta las 03:30, 50% OFF en bebidas hasta las 03:00 y champagne + 2 Speed si ingresan 5 o más.",
+        f"Cumpleaños confirmado para {birthday_name}: FREE para la persona y hasta 9 amigos hasta las 03:30, 50% OFF en bebidas hasta las 03:00 y 1 champagne + 2 energizantes si ingresan 5 o más; se registran por separado.",
         "success",
     )
     return redirect(url_for("promoter_lists", promoter=str(promoter_id)))
@@ -2478,7 +2501,7 @@ def redeem_birthday_benefit(promoter_id):
         return redirect(url_for("dashboard"))
     if arrived < BIRTHDAY_GIFT_MIN_CHECKINS:
         flash(
-            f"El champagne + 2 Speed se habilita cuando ingresan {BIRTHDAY_GIFT_MIN_CHECKINS} o más. Por ahora ingresaron {arrived}.",
+            f"El beneficio se habilita cuando ingresan {BIRTHDAY_GIFT_MIN_CHECKINS} o más. Por ahora ingresaron {arrived}.",
             "error",
         )
         return redirect(url_for("dashboard"))
@@ -2488,34 +2511,37 @@ def redeem_birthday_benefit(promoter_id):
            WHERE active=1 AND (lower(beverage_type) LIKE '%espumante%' OR lower(name) LIKE '%champ%' OR lower(brand) LIKE '%chandon%')
            ORDER BY sort_order, id LIMIT 1"""
     ).fetchone()
-    speed = db.execute(
-        """SELECT * FROM beverage_products
-           WHERE active=1 AND (lower(brand)='speed' OR lower(name) LIKE '%speed%')
-           ORDER BY sort_order, id LIMIT 1"""
-    ).fetchone()
+    energizer = find_energizer_product(db)
     missing = []
     if not champagne:
         missing.append("Champagne/espumante")
-    if not speed:
-        missing.append("Speed")
+    if not energizer:
+        missing.append("Energizante")
     if missing:
         flash(f"Configurá en Bebidas estos productos antes de entregar la promo: {', '.join(missing)}.", "error")
         return redirect(url_for("dashboard"))
 
     try:
         stamp = now_iso()
+        # Desde v2.9.5 ambos productos se registran como movimientos independientes.
+        # No hay ajustes especiales ni vínculos Champagne -> Energizante.
         ensure_beverage_in_event_stock(db, cash["id"], champagne, g.user["id"])
-        movement = db.execute(
+        ensure_beverage_in_event_stock(db, cash["id"], energizer, g.user["id"])
+        db.execute(
             """INSERT INTO movements(
                    cash_session_id, movement_type, category, sector, description, quantity,
                    unit_price, total, payment_method, created_at, created_by, promoter_id,
                    beverage_product_id, stock_units
                ) VALUES (?, 'sale', 'birthday_benefit', 'beverages', ?, 1, 0, 0, 'other', ?, ?, ?, ?, ?)""",
-            (cash["id"], "Promo cumpleaños · Champagne · incluye 2 Speed", stamp, g.user["id"], promoter_id, champagne["id"], beverage_stock_consumption(champagne, 1)),
+            (cash["id"], "Promo cumpleaños · Champagne", stamp, g.user["id"], promoter_id, champagne["id"], beverage_stock_consumption(champagne, 1)),
         )
-        add_champagne_speed_stock(
-            db, cash, g.user, movement.lastrowid, champagne, 1,
-            promoter_id=promoter_id, created_at=stamp,
+        db.execute(
+            """INSERT INTO movements(
+                   cash_session_id, movement_type, category, sector, description, quantity,
+                   unit_price, total, payment_method, created_at, created_by, promoter_id,
+                   beverage_product_id, stock_units
+               ) VALUES (?, 'sale', 'birthday_benefit', 'beverages', ?, 2, 0, 0, 'other', ?, ?, ?, ?, ?)""",
+            (cash["id"], f"Promo cumpleaños · {energizer['name']} × 2", stamp, g.user["id"], promoter_id, energizer["id"], beverage_stock_consumption(energizer, 2)),
         )
         db.execute(
             "INSERT INTO birthday_benefits(cash_session_id, promoter_id, redeemed_at, redeemed_by) VALUES (?, ?, ?, ?)",
@@ -2524,11 +2550,11 @@ def redeem_birthday_benefit(promoter_id):
         db.commit()
     except Exception:
         db.rollback()
-        app.logger.exception("Error entregando combo de cumpleaños Champagne + 2 Speed")
-        flash("No se pudo entregar el combo. No se descontó ningún producto; probá nuevamente.", "error")
+        app.logger.exception("Error entregando beneficio de cumpleaños con productos independientes")
+        flash("No se pudo entregar el beneficio. No se descontó ningún producto; probá nuevamente.", "error")
         return redirect(url_for("dashboard"))
     flash(
-        f"Beneficio entregado a {promoter['birthday_person_name']}: 1 champagne + 2 Speed. Ingresaron {arrived} personas de su lista.",
+        f"Beneficio entregado a {promoter['birthday_person_name']}: 1 Champagne y 2 energizantes registrados por separado. Ingresaron {arrived} personas de su lista.",
         "success",
     )
     return redirect(url_for("dashboard"))

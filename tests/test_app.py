@@ -638,7 +638,7 @@ class MigrationTestCase(unittest.TestCase):
             app_module.app.config["DATABASE"] = original_db
             Path(db_path).unlink(missing_ok=True)
 
-    def test_champagne_always_includes_two_speed_and_voids_together(self):
+    def test_champagne_and_energizer_are_independent_products(self):
         token = self.login()
         self.open_cash(token)
         self.client.post('/settings/beverages', data={
@@ -659,28 +659,30 @@ class MigrationTestCase(unittest.TestCase):
             'sale_kind':'beverage','beverage_id':champagne_id,'quantity':'2',
             'payment_method':'cash','csrf_token':token
         }, follow_redirects=True)
-        self.assertIn(b'4 Speed', response.data)
+        self.assertIn(b'Venta r', response.data)
+        self.assertNotIn(b'Speed (2 por champagne)', response.data)
 
         connection = sqlite3.connect(self.db_path)
         connection.row_factory = sqlite3.Row
         main = connection.execute("SELECT * FROM movements WHERE beverage_product_id=? AND category='drink' ORDER BY id DESC LIMIT 1", (champagne_id,)).fetchone()
-        included = connection.execute("SELECT * FROM beverage_stock_adjustments WHERE parent_movement_id=? AND reason='champagne_speed'", (main['id'],)).fetchone()
         self.assertEqual(main['quantity'], 2)
         self.assertEqual(main['total'], 41000)
-        self.assertEqual(included['beverage_product_id'], speed_id)
-        self.assertEqual(included['quantity'], 4)
-        self.assertEqual(included['stock_units'], 4)
-        # El acompañamiento no debe aparecer como una segunda venta monetaria.
+        # Champagne no debe crear ni movimientos ni ajustes automáticos de Energizante.
+        self.assertEqual(connection.execute("SELECT COUNT(*) FROM beverage_stock_adjustments WHERE parent_movement_id=? AND reason='champagne_speed'", (main['id'],)).fetchone()[0], 0)
         self.assertEqual(connection.execute("SELECT COUNT(*) FROM movements WHERE category='champagne_speed' AND cash_session_id=?", (main['cash_session_id'],)).fetchone()[0], 0)
+        self.assertEqual(connection.execute("SELECT COUNT(*) FROM movements WHERE beverage_product_id=? AND cash_session_id=?", (speed_id, main['cash_session_id'])).fetchone()[0], 0)
         connection.close()
 
-        self.client.post(f"/movements/{main['id']}/void", data={'reason':'prueba','csrf_token':token}, follow_redirects=True)
+        # El energizante se registra como una venta independiente cuando el operador lo toca.
+        self.client.post('/movements/quick-sale', data={
+            'sale_kind':'beverage','beverage_id':speed_id,'quantity':'2',
+            'payment_method':'cash','csrf_token':token
+        }, follow_redirects=True)
         connection = sqlite3.connect(self.db_path)
-        main_voided = connection.execute("SELECT voided FROM movements WHERE id=?", (main['id'],)).fetchone()[0]
-        included_voided = connection.execute("SELECT voided FROM beverage_stock_adjustments WHERE parent_movement_id=?", (main['id'],)).fetchone()[0]
+        speed_sale = connection.execute("SELECT quantity, total FROM movements WHERE beverage_product_id=? AND category='drink' ORDER BY id DESC LIMIT 1", (speed_id,)).fetchone()
         connection.close()
-        self.assertEqual(main_voided, 1)
-        self.assertEqual(included_voided, 1)
+        self.assertEqual(speed_sale[0], 2)
+        self.assertEqual(speed_sale[1], 6000)
 
     def test_beverage_cashier_can_open_full_beverage_history_but_ticketing_cannot(self):
         admin_token = self.login()
@@ -702,6 +704,24 @@ class MigrationTestCase(unittest.TestCase):
 
         self.login('cajero','floki123')
         self.assertEqual(self.client.get('/beverages/history').status_code, 403)
+
+    def test_champagne_and_energizers_stay_adjacent_in_quick_sale_groups(self):
+        rows = [
+            {"id": 1, "name": "Cerveza Quilmes · Lata", "beverage_type": "Cerveza", "brand": "Quilmes", "sale_unit": "lata"},
+            {"id": 2, "name": "Espumante Chandon · Botella", "beverage_type": "Espumante", "brand": "Chandon", "sale_unit": "botella"},
+            {"id": 3, "name": "Energizante Speed · Lata", "beverage_type": "Energizante", "brand": "Speed", "sale_unit": "lata"},
+            {"id": 4, "name": "Vodka Skyy · Vaso", "beverage_type": "Vodka", "brand": "Skyy", "sale_unit": "vaso"},
+        ]
+        groups = app_module.group_beverages(
+            rows,
+            product_ranking={1: 100, 4: 90, 3: 80, 2: 10},
+            category_ranking={"CERVEZAS": 100, "VODKA": 90, "ENERGIZANTES": 80, "CHAMPAGNE": 10},
+        )
+        labels = [group["label"] for group in groups]
+        champagne_index = labels.index("CHAMPAGNE")
+        self.assertEqual(labels[champagne_index + 1], "ENERGIZANTES")
+        self.assertEqual(app_module.infer_beverage_category("Energizante", "Speed", "lata", "Speed"), "ENERGIZANTES")
+
 
 
 if __name__ == "__main__":

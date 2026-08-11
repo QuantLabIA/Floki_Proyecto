@@ -18,7 +18,7 @@
 {% set compact_list_panel = false %}{% set smart_list_return = 'promoter_lists' %}{% set smart_list_title = 'Pegar o subir listas' %}{% include '_smart_list_import.html' %}
 
 <section class="card birthday-create-card">
-  <div class="section-heading"><div><p class="eyebrow">CUMPLEAÑOS CONFIRMADO</p><h2>Cumpleañero + hasta 9 amigos</h2><p class="muted compact-copy">FREE hasta las 03:30 · 50% OFF en toda la carta hasta las 03:00 · si ingresan 5 o más, reciben 1 champagne + 2 Speed.</p></div></div>
+  <div class="section-heading"><div><p class="eyebrow">CUMPLEAÑOS CONFIRMADO</p><h2>Cumpleañero + hasta 9 amigos</h2><p class="muted compact-copy">FREE hasta las 03:30 · 50% OFF en toda la carta hasta las 03:00 · si ingresan 5 o más, reciben 1 champagne + 2 energizantes (registrados por separado).</p></div></div>
   <form action="{{ url_for('create_birthday_list') }}" method="post" class="birthday-create-form stack-form">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <div class="form-grid-2">

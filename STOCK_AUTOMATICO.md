@@ -26,3 +26,7 @@ La promo de cumpleaños ya registra el mismo combo.
 El precio corresponde al Champagne/combo y los Speed se descuentan como componente de stock con ingreso $0.
 Si se venden 3 Champagne, el sistema registra 3 botellas de Champagne y 6 Speed.
 Al anular la venta original, también se anula automáticamente el descuento de Speed asociado.
+
+
+## Cambio vigente desde v2.9.5
+Champagne y Energizante se manejan como productos independientes. Ya no se descuenta Energizante automáticamente al vender Champagne. Las referencias anteriores al combo se conservan únicamente como documentación histórica de versiones previas.

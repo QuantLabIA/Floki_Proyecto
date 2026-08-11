@@ -236,7 +236,7 @@ def build_lists_pdf(
                 birthday_meta = f" · Nacimiento: {birth_date}" if birth_date else ""
                 note = (
                     f"Cumpleañero/a: {birthday_name}{birthday_meta} · Máximo 10 personas · "
-                    "FREE hasta 03:30 · 50% OFF en la carta hasta 03:00 · Champagne + 2 Speed al ingresar 5 o más"
+                    "FREE hasta 03:30 · 50% OFF en la carta hasta 03:00 · 1 Champagne + 2 energizantes al ingresar 5 o más"
                 )
             else:
                 note = "Lista de promotor - FREE válido hasta las 03:30"
