@@ -61,16 +61,20 @@ document.querySelectorAll('[data-quick-category]').forEach((button) => {
 updateSaleFields();
 
 setTimeout(() => document.querySelectorAll('.flash').forEach((element) => element.remove()), 4500);
-// v2.10.0: PWA Offline Seguro.
-// El Service Worker sólo conserva un shell operativo y recursos estáticos.
-// Nunca cachea dashboard, login, reportes, APIs ni respuestas privadas.
+// v2.10.1: modo estable online.
+// Desactiva por completo el Service Worker de v2.10.0 porque en iPhone podía dejar
+// la aplicación bajo control de una caché antigua y provocar una pantalla blanca.
+// No borramos IndexedDB para conservar cualquier operación pendiente de pruebas offline.
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', async () => {
     try {
-      await navigator.serviceWorker.register('/service-worker.js?v=2.10.0', { scope: '/' });
-    } catch (_) {
-      // La aplicación online sigue funcionando aunque el navegador no permita Service Worker.
-    }
+      const registrations = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(registrations.map((registration) => registration.unregister()));
+      if ('caches' in window) {
+        const keys = await caches.keys();
+        await Promise.all(keys.filter((key) => key.startsWith('floki-manager-')).map((key) => caches.delete(key)));
+      }
+    } catch (_) { /* Floki sigue funcionando online aunque la limpieza no esté disponible. */ }
   }, { once: true });
 }
 

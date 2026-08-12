@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="es" data-floki-csrf="{{ csrf_token if g.user else '' }}" data-floki-user-id="{{ g.user['id'] if g.user else '' }}">
+<html lang="es">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -21,7 +21,6 @@
 
   <div class="pwa-controls" aria-live="polite">
     <span class="network-status online" data-network-status><i></i><span>En línea</span></span>
-    {% if g.user %}<a class="offline-queue-button" href="{{ url_for('offline_operations_page') }}" data-offline-sync-control hidden>Pendientes <strong data-offline-pending>0</strong><span class="offline-conflict-count" data-offline-conflicts>0</span></a>{% endif %}
     <button type="button" class="install-app-button" data-install-app hidden>Instalar app</button>
   </div>
 
@@ -88,8 +87,5 @@
   {% endif %}
 
   <script src="{{ url_for('static', filename='js/app.js', v=app_version) }}" defer></script>
-  {% if g.user %}
-  <script src="{{ url_for('static', filename='js/offline-sync.js', v=app_version) }}" defer></script>
-  {% endif %}
 </body>
 </html>

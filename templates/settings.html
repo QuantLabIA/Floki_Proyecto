@@ -23,17 +23,7 @@
       </div>
     </div>
   </article>
-  <article class="card wide-card offline-readiness-card" id="modo-offline">
-    <div class="settings-close-cash-layout">
-      <div>
-        <p class="eyebrow">MODO SIN INTERNET</p>
-        <h2>Operación Offline Segura</h2>
-        <p class="muted compact-copy">Abrí Floki con internet una vez en cada celular o tablet antes del evento. El dispositivo guarda localmente el evento, listas, precios y bebidas. Si se corta internet, las ventas, ingresos FREE y gastos compatibles quedan pendientes y se sincronizan al volver la conexión.</p>
-        <div class="settings-close-event-meta"><span><span class="live-dot"></span> PWA preparada</span><strong>v{{ app_version }}</strong></div>
-      </div>
-      <div class="settings-close-cash-action"><a class="primary-button settings-close-button" href="{{ url_for('offline_operations_page') }}">Abrir modo sin internet</a></div>
-    </div>
-  </article>
+
   <article class="card wide-card" id="precios">
     <div class="section-heading"><div><p class="eyebrow">PRECIOS DE ENTRADAS</p><h2>Antes y después del horario</h2><p class="muted compact-copy">La caja elige automáticamente el precio de la entrada general. FREE se confirma exclusivamente desde las listas; VIP y anticipada fueron eliminadas.</p></div></div>
     <form action="{{ url_for('update_prices') }}" method="post" class="stack-form" data-ajax-price-settings>

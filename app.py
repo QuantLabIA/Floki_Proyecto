@@ -68,7 +68,7 @@ DATA_DIR = BASE_DIR / "data"
 BACKUP_DIR = BASE_DIR / "backups"
 DATABASE = DATA_DIR / "floki.db"
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
-APP_VERSION = "2.10.0"
+APP_VERSION = "2.10.1"
 ARGENTINA_TZ = ZoneInfo("America/Argentina/Buenos_Aires")
 
 PAYMENT_METHODS = {"cash", "mercadopago", "transfer", "debit", "credit", "other"}
@@ -4383,6 +4383,15 @@ def service_worker():
 @app.route("/offline")
 def offline():
     return render_template("offline.html")
+
+
+@app.route("/pwa-reset")
+def pwa_reset():
+    """Pantalla autocontenida para retirar Service Workers/cachés viejas en iPhone."""
+    html = """<!doctype html><html lang='es'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Floki · Recuperar app</title></head><body style='margin:0;padding:28px;background:#09070d;color:#fff;font-family:system-ui,sans-serif'><main style='max-width:680px;margin:auto'><p style='color:#c66cff;font-weight:800;letter-spacing:.08em'>FLOKI MANAGER</p><h1>Recuperando la aplicación…</h1><p id='status'>Quitando la caché offline anterior.</p><p><a id='continue' href='/login' style='display:none;color:#fff;background:#8d35ff;padding:12px 16px;border-radius:12px;text-decoration:none;font-weight:700'>Volver a Floki</a></p><script>(async()=>{let msg='Limpieza completada.';try{if('serviceWorker' in navigator){const regs=await navigator.serviceWorker.getRegistrations();await Promise.all(regs.map(r=>r.unregister()));}if('caches' in window){const keys=await caches.keys();await Promise.all(keys.filter(k=>k.startsWith('floki-manager-')).map(k=>caches.delete(k)));}}catch(e){msg='La limpieza automática terminó parcialmente. Podés volver a Floki.';}document.getElementById('status').textContent=msg;document.getElementById('continue').style.display='inline-block';setTimeout(()=>location.replace('/login'),900);} )();</script></main></body></html>"""
+    response = Response(html, mimetype="text/html")
+    response.headers["Cache-Control"] = "no-store, private, max-age=0"
+    return response
 
 
 @app.errorhandler(500)
