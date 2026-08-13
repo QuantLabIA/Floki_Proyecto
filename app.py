@@ -68,7 +68,7 @@ DATA_DIR = BASE_DIR / "data"
 BACKUP_DIR = BASE_DIR / "backups"
 DATABASE = DATA_DIR / "floki.db"
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
-APP_VERSION = "2.10.3"
+APP_VERSION = "2.10.4"
 ARGENTINA_TZ = ZoneInfo("America/Argentina/Buenos_Aires")
 
 PAYMENT_METHODS = {"cash", "mercadopago", "transfer", "debit", "credit", "other"}
@@ -4352,6 +4352,60 @@ def offline_app_service_worker():
     # El script vive debajo de /offline-app/: por diseño jamás puede controlar /, dashboard, login o reportes.
     response.headers["Service-Worker-Allowed"] = "/offline-app/"
     response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    return response
+
+
+@app.get("/offline-recover")
+def offline_recover():
+    # Ruta fuera del scope /offline-app/: permite reparar un Service Worker/caché offline
+    # aunque el propio shell offline haya quedado inutilizable. No borra IndexedDB ni la cola.
+    html = """<!doctype html>
+<html lang='es'>
+<head>
+  <meta charset='utf-8'>
+  <meta name='viewport' content='width=device-width,initial-scale=1,viewport-fit=cover'>
+  <meta name='theme-color' content='#050508'>
+  <title>Floki · Reparar modo offline</title>
+  <style>
+    *{box-sizing:border-box}html,body{min-height:100%;margin:0;background:#050508;color:#f8f7fb;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}
+    body{display:grid;place-items:center;padding:24px}.box{width:min(680px,100%);padding:24px;border:1px solid #2c2636;border-radius:18px;background:#111017}
+    .eyebrow{margin:0 0 8px;color:#d39aff;font-size:12px;font-weight:800;letter-spacing:.14em}.muted{color:#aaa4b3;line-height:1.55}
+    a{color:#fff}.button{display:inline-block;margin-top:12px;padding:12px 16px;border-radius:12px;background:#7d24ef;color:#fff;text-decoration:none;font-weight:800}
+  </style>
+</head>
+<body>
+  <main class='box'>
+    <p class='eyebrow'>FLOKI MANAGER · RECUPERACIÓN OFFLINE</p>
+    <h1>Reparando el modo sin conexión…</h1>
+    <p id='status' class='muted'>Quitando únicamente el Service Worker y la caché del módulo offline. Tus operaciones pendientes guardadas en IndexedDB no se borran.</p>
+    <a id='continue' class='button' href='/offline-app/?manual=1' style='display:none'>Abrir Floki Offline</a>
+  </main>
+  <script>
+  (async()=>{
+    const status=document.getElementById('status');
+    const button=document.getElementById('continue');
+    let message='Caché offline reparada.';
+    try{
+      if('serviceWorker' in navigator){
+        const regs=await navigator.serviceWorker.getRegistrations();
+        await Promise.all(regs.filter((reg)=>{
+          try{return new URL(reg.scope).pathname.startsWith('/offline-app/');}catch(_){return false;}
+        }).map((reg)=>reg.unregister()));
+      }
+      if('caches' in window){
+        const keys=await caches.keys();
+        await Promise.all(keys.filter((key)=>key.startsWith('floki-offline-app-')||key.startsWith('floki-manager-')).map((key)=>caches.delete(key)));
+      }
+    }catch(error){message='La limpieza terminó parcialmente, pero ya podés volver a abrir el modo offline.';}
+    status.textContent=message+' No se borraron ventas pendientes ni datos operativos locales.';
+    button.style.display='inline-block';
+    setTimeout(()=>location.replace('/offline-app/?recovered='+Date.now()),700);
+  })();
+  </script>
+</body>
+</html>"""
+    response = Response(html, mimetype="text/html")
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
     return response
 
 
