@@ -1,0 +1,17 @@
+{
+  "id": "/offline-app/",
+  "name": "Floki Offline",
+  "short_name": "Floki Offline",
+  "description": "Panel operativo aislado de Floki Manager para boletería, bebidas y gastos sin conexión",
+  "lang": "es-AR",
+  "start_url": "/offline-app/?source=home",
+  "scope": "/offline-app/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#050508",
+  "theme_color": "#08060d",
+  "icons": [
+    {"src": "/offline-app/assets/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable"},
+    {"src": "/offline-app/assets/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"}
+  ]
+}

@@ -61,20 +61,22 @@ document.querySelectorAll('[data-quick-category]').forEach((button) => {
 updateSaleFields();
 
 setTimeout(() => document.querySelectorAll('.flash').forEach((element) => element.remove()), 4500);
-// v2.10.1: modo estable online.
-// Desactiva por completo el Service Worker de v2.10.0 porque en iPhone podía dejar
-// la aplicación bajo control de una caché antigua y provocar una pantalla blanca.
-// No borramos IndexedDB para conservar cualquier operación pendiente de pruebas offline.
+// v2.10.2: Offline Aislado.
+// La aplicación principal NUNCA queda bajo control de un Service Worker.
+// Sólo retiramos workers heredados con scope raíz; el worker nuevo vive en /offline-app/.
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', async () => {
     try {
       const registrations = await navigator.serviceWorker.getRegistrations();
-      await Promise.all(registrations.map((registration) => registration.unregister()));
+      await Promise.all(registrations.filter((registration) => {
+        try { return new URL(registration.scope).pathname === '/'; } catch (_) { return false; }
+      }).map((registration) => registration.unregister()));
       if ('caches' in window) {
         const keys = await caches.keys();
         await Promise.all(keys.filter((key) => key.startsWith('floki-manager-')).map((key) => caches.delete(key)));
       }
-    } catch (_) { /* Floki sigue funcionando online aunque la limpieza no esté disponible. */ }
+      await navigator.serviceWorker.register('/offline-app/service-worker.js?v=2.10.2', { scope: '/offline-app/' });
+    } catch (_) { /* Floki online sigue funcionando aunque el modo offline no pueda prepararse. */ }
   }, { once: true });
 }
 

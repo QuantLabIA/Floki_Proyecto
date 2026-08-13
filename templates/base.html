@@ -21,6 +21,7 @@
 
   <div class="pwa-controls" aria-live="polite">
     <span class="network-status online" data-network-status><i></i><span>En línea</span></span>
+    {% if g.user %}<a class="offline-queue-button" href="{{ url_for('offline_app') }}" data-offline-bridge-link>Modo offline <strong data-offline-bridge-pending>0</strong></a>{% endif %}
     <button type="button" class="install-app-button" data-install-app hidden>Instalar app</button>
   </div>
 
@@ -87,5 +88,6 @@
   {% endif %}
 
   <script src="{{ url_for('static', filename='js/app.js', v=app_version) }}" defer></script>
+  {% if g.user %}<script src="{{ url_for('static', filename='js/offline-bridge.js', v=app_version) }}" defer></script>{% endif %}
 </body>
 </html>

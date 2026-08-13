@@ -68,7 +68,7 @@ DATA_DIR = BASE_DIR / "data"
 BACKUP_DIR = BASE_DIR / "backups"
 DATABASE = DATA_DIR / "floki.db"
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
-APP_VERSION = "2.10.1"
+APP_VERSION = "2.10.2"
 ARGENTINA_TZ = ZoneInfo("America/Argentina/Buenos_Aires")
 
 PAYMENT_METHODS = {"cash", "mercadopago", "transfer", "debit", "credit", "other"}
@@ -187,7 +187,11 @@ def add_security_headers(response):
     response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
     response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
     response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
-    offline_shell = request.path in {"/offline", "/offline-operations", "/service-worker.js", "/manifest.webmanifest"} or request.path.startswith("/static/")
+    offline_shell = (
+        request.path in {"/offline", "/service-worker.js", "/manifest.webmanifest"}
+        or request.path.startswith("/offline-app/")
+        or request.path.startswith("/static/")
+    )
     # HTML dinámico, login y datos privados nunca deben persistirse en la caché de la PWA.
     if not offline_shell and (response.mimetype == "text/html" or session.get("user_id") or request.path.startswith(("/api/", "/history", "/stock", "/promoter", "/login", "/logout"))):
         response.headers["Cache-Control"] = "no-store, private, max-age=0"
@@ -4132,6 +4136,18 @@ def offline_bootstrap_payload():
             ).fetchall()
         ]
     if show_beverages:
+        beverage_rows = get_db().execute(
+            "SELECT * FROM beverage_products WHERE active=1 ORDER BY name COLLATE NOCASE"
+        ).fetchall()
+        current_sold = beverage_paid_sales_by_product(cash["id"])
+        previous_product_sales, previous_category_sales = previous_event_beverage_ranking(cash["id"])
+        grouped = group_beverages(
+            beverage_rows,
+            product_ranking=previous_product_sales,
+            category_ranking=previous_category_sales,
+            sold_counts=current_sold,
+        )
+        ordered_beverages = [item for group in grouped for item in group["items"]]
         payload["beverages"] = [
             {
                 "id": row["id"],
@@ -4142,10 +4158,11 @@ def offline_bootstrap_payload():
                 "beverage_type": row["beverage_type"],
                 "brand": row["brand"],
                 "presentation": row["presentation"],
+                "sold_count": int(row.get("sold_count", 0) or 0),
+                "previous_sold_count": int(row.get("previous_sold_count", 0) or 0),
+                "category": infer_beverage_category(row.get("beverage_type"), row.get("brand"), row.get("sale_unit"), row.get("name")),
             }
-            for row in get_db().execute(
-                "SELECT * FROM beverage_products WHERE active=1 ORDER BY name COLLATE NOCASE"
-            ).fetchall()
+            for row in ordered_beverages
         ]
         payload["birthdays"] = [
             {
@@ -4289,10 +4306,59 @@ def offline_sync():
     return jsonify({"ok": True, "results": results, "summary": summary, "bootstrap": offline_bootstrap_payload()})
 
 
+@app.get("/offline-app/")
+def offline_app():
+    # Shell intencionalmente sin datos privados: todo el catálogo/evento vive en IndexedDB.
+    # Esto permite cachearlo sin que el Service Worker tenga alcance sobre el resto de Floki.
+    response = render_template("offline_app.html")
+    response = Response(response, mimetype="text/html")
+    response.headers["Cache-Control"] = "no-cache, max-age=0"
+    return response
+
+
+@app.get("/offline-app/assets/<path:asset_name>")
+def offline_app_asset(asset_name):
+    allowed = {
+        "app.css": "app.css",
+        "offline-sync.js": "offline-sync.js",
+        "offline-page.js": "offline-page.js",
+        "icon-192.png": "icon-192.png",
+        "icon-512.png": "icon-512.png",
+        "floki-logo-white.png": "floki-logo-white.png",
+    }
+    filename = allowed.get(asset_name)
+    if not filename:
+        abort(404)
+    mimetype = None
+    if filename.endswith(".js"):
+        mimetype = "application/javascript"
+    elif filename.endswith(".css"):
+        mimetype = "text/css"
+    response = send_from_directory(BASE_DIR / "static" / "offline_app", filename, mimetype=mimetype)
+    response.headers["Cache-Control"] = "public, max-age=3600"
+    return response
+
+
+@app.get("/offline-app/manifest.webmanifest")
+def offline_app_manifest():
+    response = send_from_directory(BASE_DIR / "static" / "offline_app", "manifest.webmanifest", mimetype="application/manifest+json")
+    response.headers["Cache-Control"] = "no-cache"
+    return response
+
+
+@app.get("/offline-app/service-worker.js")
+def offline_app_service_worker():
+    response = send_from_directory(BASE_DIR / "static" / "offline_app", "service-worker.js", mimetype="application/javascript")
+    # El script vive debajo de /offline-app/: por diseño jamás puede controlar /, dashboard, login o reportes.
+    response.headers["Service-Worker-Allowed"] = "/offline-app/"
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    return response
+
+
 @app.get("/offline-operations")
 def offline_operations_page():
-    response = render_template("offline_operations.html")
-    return Response(response, mimetype="text/html")
+    # Compatibilidad con favoritos/pruebas de v2.10.0.
+    return redirect(url_for("offline_app"))
 
 
 @app.route("/api/status")
@@ -4347,8 +4413,10 @@ def diagnostic():
         "database": "postgresql" if db.is_postgres else "sqlite",
         "user": {"id": g.user["id"], "username": g.user["username"], "role": g.user["role"], "sector": g.user["sector"]},
         "checks": checks,
-        "offline_safe_stage": 2,
+        "offline_safe_stage": 3,
         "offline_temporarily_disabled": False,
+        "offline_mode": "isolated",
+        "offline_scope": "/offline-app/",
     }), (200 if ok else 500)
 
 
@@ -4388,7 +4456,7 @@ def offline():
 @app.route("/pwa-reset")
 def pwa_reset():
     """Pantalla autocontenida para retirar Service Workers/cachés viejas en iPhone."""
-    html = """<!doctype html><html lang='es'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Floki · Recuperar app</title></head><body style='margin:0;padding:28px;background:#09070d;color:#fff;font-family:system-ui,sans-serif'><main style='max-width:680px;margin:auto'><p style='color:#c66cff;font-weight:800;letter-spacing:.08em'>FLOKI MANAGER</p><h1>Recuperando la aplicación…</h1><p id='status'>Quitando la caché offline anterior.</p><p><a id='continue' href='/login' style='display:none;color:#fff;background:#8d35ff;padding:12px 16px;border-radius:12px;text-decoration:none;font-weight:700'>Volver a Floki</a></p><script>(async()=>{let msg='Limpieza completada.';try{if('serviceWorker' in navigator){const regs=await navigator.serviceWorker.getRegistrations();await Promise.all(regs.map(r=>r.unregister()));}if('caches' in window){const keys=await caches.keys();await Promise.all(keys.filter(k=>k.startsWith('floki-manager-')).map(k=>caches.delete(k)));}}catch(e){msg='La limpieza automática terminó parcialmente. Podés volver a Floki.';}document.getElementById('status').textContent=msg;document.getElementById('continue').style.display='inline-block';setTimeout(()=>location.replace('/login'),900);} )();</script></main></body></html>"""
+    html = """<!doctype html><html lang='es'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Floki · Recuperar app</title></head><body style='margin:0;padding:28px;background:#09070d;color:#fff;font-family:system-ui,sans-serif'><main style='max-width:680px;margin:auto'><p style='color:#c66cff;font-weight:800;letter-spacing:.08em'>FLOKI MANAGER</p><h1>Recuperando la aplicación…</h1><p id='status'>Quitando la caché offline anterior.</p><p><a id='continue' href='/login' style='display:none;color:#fff;background:#8d35ff;padding:12px 16px;border-radius:12px;text-decoration:none;font-weight:700'>Volver a Floki</a></p><script>(async()=>{let msg='Limpieza completada.';try{if('serviceWorker' in navigator){const regs=await navigator.serviceWorker.getRegistrations();await Promise.all(regs.filter(r=>{try{return new URL(r.scope).pathname==='/';}catch(_){return false;}}).map(r=>r.unregister()));}if('caches' in window){const keys=await caches.keys();await Promise.all(keys.filter(k=>k.startsWith('floki-manager-')).map(k=>caches.delete(k)));}}catch(e){msg='La limpieza automática terminó parcialmente. Podés volver a Floki.';}document.getElementById('status').textContent=msg;document.getElementById('continue').style.display='inline-block';setTimeout(()=>location.replace('/login'),900);} )();</script></main></body></html>"""
     response = Response(html, mimetype="text/html")
     response.headers["Cache-Control"] = "no-store, private, max-age=0"
     return response
