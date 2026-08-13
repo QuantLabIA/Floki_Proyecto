@@ -1,7 +1,7 @@
-// Floki Manager v2.10.2 — Service Worker AISLADO.
+// Floki Manager v2.10.3 — Service Worker AISLADO.
 // Scope exclusivo: /offline-app/. Nunca controla Dashboard, Login, Ajustes, Historial ni reportes.
 const CACHE_PREFIX = 'floki-offline-app-';
-const CACHE_VERSION = `${CACHE_PREFIX}v2-10-2`;
+const CACHE_VERSION = `${CACHE_PREFIX}v2-10-3`;
 const SHELL = '/offline-app/';
 const PRECACHE = [
   SHELL,

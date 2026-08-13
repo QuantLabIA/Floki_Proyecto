@@ -61,7 +61,7 @@ document.querySelectorAll('[data-quick-category]').forEach((button) => {
 updateSaleFields();
 
 setTimeout(() => document.querySelectorAll('.flash').forEach((element) => element.remove()), 4500);
-// v2.10.2: Offline Aislado.
+// v2.10.3: Offline Aislado.
 // La aplicación principal NUNCA queda bajo control de un Service Worker.
 // Sólo retiramos workers heredados con scope raíz; el worker nuevo vive en /offline-app/.
 if ('serviceWorker' in navigator) {
@@ -75,7 +75,7 @@ if ('serviceWorker' in navigator) {
         const keys = await caches.keys();
         await Promise.all(keys.filter((key) => key.startsWith('floki-manager-')).map((key) => caches.delete(key)));
       }
-      await navigator.serviceWorker.register('/offline-app/service-worker.js?v=2.10.2', { scope: '/offline-app/' });
+      await navigator.serviceWorker.register('/offline-app/service-worker.js?v=2.10.3', { scope: '/offline-app/' });
     } catch (_) { /* Floki online sigue funcionando aunque el modo offline no pueda prepararse. */ }
   }, { once: true });
 }

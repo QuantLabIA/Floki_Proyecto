@@ -59,7 +59,7 @@
         await Promise.all(registrations.filter((registration) => {
           try { return new URL(registration.scope).pathname === '/'; } catch (_) { return false; }
         }).map((registration) => registration.unregister()));
-        await navigator.serviceWorker.register('/offline-app/service-worker.js?v=2.10.2', { scope: '/offline-app/' });
+        await navigator.serviceWorker.register('/offline-app/service-worker.js?v=2.10.3', { scope: '/offline-app/' });
       }
       if ('caches' in window) {
         const keys = await caches.keys();

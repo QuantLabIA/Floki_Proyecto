@@ -12,6 +12,28 @@
   <link rel="icon" href="/offline-app/assets/icon-192.png" type="image/png">
   <link rel="apple-touch-icon" href="/offline-app/assets/icon-192.png">
   <link rel="stylesheet" href="/offline-app/assets/app.css?v={{ app_version }}">
+  <style>
+    /* v2.10.3 · Render seguro iPhone/iPad.
+       El shell offline no usa blur, mask ni compositing pesado: evita la pantalla blanca de WebKit. */
+    html, body { min-height: 100% !important; background: #050508 !important; color: #f8f7fb !important; opacity: 1 !important; visibility: visible !important; }
+    body.offline-operations-page { min-height: 100vh !important; background: #050508 !important; opacity: 1 !important; visibility: visible !important; -webkit-transform: none !important; transform: none !important; }
+    body.offline-operations-page::before,
+    body.offline-operations-page .ambient { display: none !important; filter: none !important; -webkit-filter: none !important; mask-image: none !important; -webkit-mask-image: none !important; }
+    body.offline-operations-page .offline-shell { opacity: 1 !important; visibility: visible !important; transform: none !important; -webkit-transform: none !important; }
+    body.offline-operations-page .card,
+    body.offline-operations-page .offline-header,
+    body.offline-operations-page .offline-event,
+    body.offline-operations-page .offline-queue-summary,
+    body.offline-operations-page .offline-footer {
+      backdrop-filter: none !important;
+      -webkit-backdrop-filter: none !important;
+      background: #111017 !important;
+      box-shadow: 0 10px 30px rgba(0,0,0,.34) !important;
+      transform: none !important;
+      -webkit-transform: none !important;
+    }
+    body.offline-operations-page .offline-brand img { filter: none !important; -webkit-filter: none !important; }
+  </style>
   <title>Floki Offline · Modo sin conexión</title>
 </head>
 <body class="offline-operations-page" data-offline-operations-page>
@@ -82,12 +104,8 @@
         return;
       }
       try {
-        const registration = await navigator.serviceWorker.register('/offline-app/service-worker.js?v=2.10.2', { scope: '/offline-app/' });
-        await navigator.serviceWorker.ready;
+        const registration = await navigator.serviceWorker.register('/offline-app/service-worker.js?v=2.10.3', { scope: '/offline-app/' });
         install.innerHTML = '<p class="eyebrow">MODO AISLADO LISTO</p><h2>Este dispositivo ya puede abrir Floki Offline sin internet</h2><p class="muted">El alcance del Service Worker es <strong>/offline-app/</strong>. La aplicación principal queda fuera de su control.</p>';
-        if (!navigator.serviceWorker.controller && navigator.onLine) {
-          setTimeout(() => location.reload(), 250);
-        }
       } catch (error) {
         install.innerHTML = '<p class="eyebrow">FALTA PREPARAR</p><h2>No se pudo instalar el modo offline</h2><p class="muted">Revisá la conexión y tocá actualizar. La aplicación principal no se ve afectada.</p>';
       }

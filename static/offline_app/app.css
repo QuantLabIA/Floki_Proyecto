@@ -1639,3 +1639,39 @@ body.app-page .admin-quick-tabs {
   .settings-close-cash-layout { grid-template-columns: 1fr; }
   .settings-close-cash-action, .settings-close-button { width: 100%; min-width: 0; }
 }
+
+
+/* v2.10.3 · iPhone/iPad render seguro para el módulo aislado. */
+body.offline-operations-page {
+  min-height: 100vh !important;
+  background: #050508 !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+body.offline-operations-page::before,
+body.offline-operations-page .ambient {
+  display: none !important;
+  filter: none !important;
+  -webkit-filter: none !important;
+  mask-image: none !important;
+  -webkit-mask-image: none !important;
+}
+body.offline-operations-page .offline-shell {
+  opacity: 1 !important;
+  visibility: visible !important;
+  transform: none !important;
+  -webkit-transform: none !important;
+}
+body.offline-operations-page .card,
+body.offline-operations-page .offline-header,
+body.offline-operations-page .offline-event,
+body.offline-operations-page .offline-queue-summary,
+body.offline-operations-page .offline-footer {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  background: #111017 !important;
+  box-shadow: 0 10px 30px rgba(0,0,0,.34) !important;
+  transform: none !important;
+  -webkit-transform: none !important;
+}
+body.offline-operations-page .offline-brand img { filter: none !important; -webkit-filter: none !important; }
