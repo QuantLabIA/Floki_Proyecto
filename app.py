@@ -68,7 +68,7 @@ DATA_DIR = BASE_DIR / "data"
 BACKUP_DIR = BASE_DIR / "backups"
 DATABASE = DATA_DIR / "floki.db"
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
-APP_VERSION = "2.10.7"
+APP_VERSION = "2.10.8"
 ARGENTINA_TZ = ZoneInfo("America/Argentina/Buenos_Aires")
 
 PAYMENT_METHODS = {"cash", "mercadopago", "transfer", "debit", "credit", "other"}
@@ -132,7 +132,7 @@ CATEGORY_LABELS = {
     "advance": "Anticipada",
     "vip": "VIP",
     "drink": "Consumición",
-    "drink_zero": "SPEED $0 · INCLUIDO CON CHAMPAGNE",
+    "drink_zero": "SPEED DE CHAMPAGNE $0",
     "drink_special": "Bebida especial",
     "rrpp_benefit": "BENEFICIO RRPP",
     "birthday_benefit": "BENEFICIO CUMPLEAÑOS",
@@ -189,7 +189,7 @@ def add_security_headers(response):
     response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
     response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
     static_or_manifest = request.path.startswith("/static/") or request.path == "/manifest.webmanifest"
-    # v2.10.7: Floki es exclusivamente online. HTML dinámico, login y datos privados nunca se cachean.
+    # v2.10.8: Floki es exclusivamente online. HTML dinámico, login y datos privados nunca se cachean.
     if not static_or_manifest and (response.mimetype == "text/html" or session.get("user_id") or request.path.startswith(("/api/", "/history", "/stock", "/promoter", "/login", "/logout"))):
         response.headers["Cache-Control"] = "no-store, private, max-age=0"
         response.headers["Pragma"] = "no-cache"
@@ -2080,7 +2080,7 @@ def perform_quick_sale(db, cash, user, payload, *, created_at=None):
                 raise ValueError("La opción $0 está reservada para Speed incluido con Champagne")
             category = "drink_zero"
             unit_price = 0.0
-            description = f"SPEED $0 · INCLUIDO CON CHAMPAGNE · {product['name']} · {sale_unit}"
+            description = f"SPEED DE CHAMPAGNE · {sale_unit} · ENERGIZANTE"
             payment_method = "other"
         elif sale_kind == "special_beverage":
             category = "drink_special"

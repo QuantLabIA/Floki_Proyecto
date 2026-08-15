@@ -1641,3 +1641,20 @@ body.app-page .admin-quick-tabs {
   .settings-close-cash-layout { grid-template-columns: 1fr; }
   .settings-close-cash-action, .settings-close-button { width: 100%; min-width: 0; }
 }
+
+/* v2.10.8 — UI bebidas y movimientos */
+.movement-heading-actions { display:flex; align-items:center; gap:10px; }
+.compact-report-link { min-height:38px; padding:9px 13px; display:inline-flex; align-items:center; justify-content:center; border-radius:12px; text-decoration:none; white-space:nowrap; }
+.movement-actions-menu { position:relative; margin-left:6px; flex:0 0 auto; }
+.movement-actions-menu > summary { list-style:none; width:38px; height:38px; display:grid; place-items:center; border:1px solid rgba(255,255,255,.16); border-radius:11px; background:rgba(255,255,255,.04); color:#f4f0f7; font-size:1.35rem; line-height:1; cursor:pointer; }
+.movement-actions-menu > summary::-webkit-details-marker { display:none; }
+.movement-actions-popover { position:absolute; right:0; top:44px; z-index:30; min-width:190px; padding:6px; border:1px solid rgba(255,255,255,.14); border-radius:14px; background:#17131d; box-shadow:0 18px 42px rgba(0,0,0,.45); }
+.movement-actions-popover form { margin:0; }
+.menu-danger { width:100%; border:0; background:transparent; color:#ff8b9e; text-align:left; padding:11px 12px; border-radius:10px; font:inherit; cursor:pointer; }
+.menu-danger:hover { background:rgba(255,101,125,.08); }
+@media (max-width: 720px) {
+  .section-heading { align-items:flex-start; }
+  .movement-heading-actions { width:auto; }
+  .compact-report-link { font-size:.72rem; padding:8px 10px; }
+  .movement-actions-popover { min-width:170px; }
+}

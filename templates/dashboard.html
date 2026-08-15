@@ -199,7 +199,7 @@
         {% if beverage['is_speed'] %}
         <form action="{{ url_for('register_quick_sale') }}" method="post" class="quick-sale-form" data-quick-form>
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="sale_kind" value="beverage_zero"><input type="hidden" name="beverage_id" value="{{ beverage['id'] }}"><input type="hidden" name="payment_method" value="other"><input type="hidden" name="quantity" value="1" data-quick-quantity>
-          <button type="submit" class="quick-sale-button beverage-button benefit-action"><span>{{ beverage['name'] }} · CHAMPAGNE</span><strong>$0</strong><small>Incluido con champagne · descuenta stock</small></button>
+          <button type="submit" class="quick-sale-button beverage-button benefit-action"><span>SPEED DE CHAMPAGNE · {{ beverage['sale_unit']|upper }} · ENERGIZANTE</span><strong>$0</strong><small>Incluido con champagne · descuenta stock</small></button>
         </form>
         {% endif %}
         {% endfor %}
@@ -269,7 +269,7 @@
 
 {% if g.user['role']=='admin' or sector in ['ticketing','beverages'] %}
 <section class="card">
-  <div class="section-heading"><div><p class="eyebrow">ACTIVIDAD DEL SECTOR</p><h2>Últimos movimientos</h2></div>{% if g.user['role']!='admin' and sector=='beverages' %}<a href="{{ url_for('beverage_history') }}">Consultar por horario</a>{% endif %}</div>
+  <div class="section-heading"><div><p class="eyebrow">ACTIVIDAD DEL SECTOR</p><h2>Últimos movimientos</h2></div><div class="movement-heading-actions">{% if g.user['role']=='admin' %}<a class="secondary-button compact-report-link" href="{{ url_for('close_cash') }}">Ver reporte completo</a>{% elif sector=='beverages' %}<a href="{{ url_for('beverage_history') }}">Consultar por horario</a>{% endif %}</div></div>
   <div class="movement-list">
     {% if movements %}{% for movement in movements %}
       <div class="movement-row {% if movement['voided'] %}voided{% endif %}">
@@ -277,10 +277,13 @@
         <div class="movement-main"><strong>{% if movement['movement_type']=='expense' %}{{ movement['description'] }}{% elif movement['description'] %}{{ movement['description'] }} × {{ movement['quantity'] }}{% else %}{{ category_labels.get(movement['category'], movement['category']) }} × {{ movement['quantity'] }}{% endif %}</strong><small>{{ movement['created_at']|datetime_ar }} · {{ payment_labels[movement['payment_method']] }}{% if movement['promoter_name'] %} · RRPP {{ movement['promoter_name'] }}{% endif %}</small></div>
         {% if g.user['role']=='admin' or sector=='beverages' %}<strong class="movement-amount">{% if movement['movement_type']=='expense' %}−{% endif %}{{ movement['total']|money }}</strong>{% endif %}
         {% if g.user['role']=='admin' and not movement['voided'] %}
-          <div class="movement-admin-actions">
-            <form action="{{ url_for('void_movement', movement_id=movement['id']) }}" method="post" data-confirm="¿Anular este movimiento? Quedará visible como ANULADO y no contará."><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="reason" value="Anulado desde el panel"><button class="tiny-danger" type="submit">Anular</button></form>
-            {% if movement['sector']=='beverages' and movement['movement_type']=='sale' %}<form action="{{ url_for('delete_beverage_movement', movement_id=movement['id']) }}" method="post" data-confirm="¿Borrar esta bebida de la lista? Desaparecerá del historial del evento abierto y no contará en ventas ni stock."><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="tiny-danger" type="submit">Borrar</button></form>{% endif %}
-          </div>
+          <details class="movement-actions-menu">
+            <summary aria-label="Opciones del movimiento">⋮</summary>
+            <div class="movement-actions-popover">
+              <form action="{{ url_for('void_movement', movement_id=movement['id']) }}" method="post" data-confirm="¿Anular este movimiento? Quedará visible como ANULADO y no contará."><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="reason" value="Anulado desde el panel"><button class="menu-danger" type="submit">Anular movimiento</button></form>
+              {% if movement['sector']=='beverages' and movement['movement_type']=='sale' %}<form action="{{ url_for('delete_beverage_movement', movement_id=movement['id']) }}" method="post" data-confirm="¿Borrar esta bebida de la lista? Desaparecerá del historial del evento abierto y no contará en ventas ni stock."><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="menu-danger" type="submit">Borrar movimiento</button></form>{% endif %}
+            </div>
+          </details>
         {% endif %}
       </div>
     {% endfor %}{% else %}<p class="muted">Todavía no hay movimientos en este sector.</p>{% endif %}
