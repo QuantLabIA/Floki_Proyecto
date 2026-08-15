@@ -160,7 +160,7 @@
     <div class="quick-group-title"><strong>Entradas</strong><small>Precio vigente según horario</small></div>
     <div class="quick-button-grid">
       {% for entry in entry_prices %}
-      <form action="{{ url_for('register_quick_sale') }}" method="post" data-offline-operation="quick_sale" class="quick-sale-form" data-quick-form data-entry-form>
+      <form action="{{ url_for('register_quick_sale') }}" method="post" class="quick-sale-form" data-quick-form data-entry-form>
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="sale_kind" value="entry"><input type="hidden" name="category" value="{{ entry['category'] }}"><input type="hidden" name="payment_method" value="cash" data-quick-payment><input type="hidden" name="quantity" value="1" data-quick-quantity><input type="hidden" name="promoter_id" value="" data-quick-promoter>
         <button type="submit" class="quick-sale-button entry-button"><span>{{ entry['label'] }}</span><strong>{{ entry['current_price']|money }}</strong><small>{{ entry['phase'] }}</small></button>
       </form>
@@ -175,7 +175,7 @@
     <div class="quick-group-title"><strong>Guardarropa</strong><small>Venta rápida desde boletería</small></div>
     <div class="quick-button-grid">
       {% for product in ticketing_products %}
-      <form action="{{ url_for('register_quick_sale') }}" method="post" data-offline-operation="quick_sale" class="quick-sale-form" data-quick-form>
+      <form action="{{ url_for('register_quick_sale') }}" method="post" class="quick-sale-form" data-quick-form>
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="sale_kind" value="ticketing_product"><input type="hidden" name="ticketing_product_id" value="{{ product['id'] }}"><input type="hidden" name="payment_method" value="cash" data-quick-payment><input type="hidden" name="quantity" value="1" data-quick-quantity>
         <button type="submit" class="quick-sale-button cloakroom-button"><span>{{ product['name'] }}</span><strong>{{ product['price']|money }}</strong><small>Registrar prenda</small></button>
       </form>
@@ -192,12 +192,12 @@
       <div class="beverage-sale-category-title"><strong>{{ group['label'] }}</strong><small>{{ group['items']|length }} opciones{% if group['previous_sold_count'] %} · {{ group['previous_sold_count'] }} vendidas en evento anterior{% endif %}</small></div>
       <div class="quick-button-grid beverage-grid">
         {% for beverage in group['items'] %}
-        <form action="{{ url_for('register_quick_sale') }}" method="post" data-offline-operation="quick_sale" class="quick-sale-form" data-quick-form>
+        <form action="{{ url_for('register_quick_sale') }}" method="post" class="quick-sale-form" data-quick-form>
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="sale_kind" value="beverage"><input type="hidden" name="beverage_id" value="{{ beverage['id'] }}"><input type="hidden" name="payment_method" value="cash"><input type="hidden" name="quantity" value="1" data-quick-quantity>
           <button type="submit" class="quick-sale-button beverage-button"><span>{{ beverage['name'] }}</span><strong>{{ beverage['price']|money }}</strong><small>{{ beverage['sale_unit']|title }} · vendidas hoy: {{ beverage['sold_count'] }}</small></button>
         </form>
         {% if beverage['is_speed'] %}
-        <form action="{{ url_for('register_quick_sale') }}" method="post" data-offline-operation="quick_sale" class="quick-sale-form" data-quick-form>
+        <form action="{{ url_for('register_quick_sale') }}" method="post" class="quick-sale-form" data-quick-form>
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="sale_kind" value="beverage_zero"><input type="hidden" name="beverage_id" value="{{ beverage['id'] }}"><input type="hidden" name="payment_method" value="other"><input type="hidden" name="quantity" value="1" data-quick-quantity>
           <button type="submit" class="quick-sale-button beverage-button benefit-action"><span>{{ beverage['name'] }} · CHAMPAGNE</span><strong>$0</strong><small>Incluido con champagne · descuenta stock</small></button>
         </form>
@@ -248,7 +248,7 @@
     <div><p class="eyebrow">GASTOS DEL EVENTO</p><h2>Agregar gasto</h2><p class="muted compact-copy">Registrá acá cualquier salida de dinero de la noche. Se descuenta automáticamente del resultado final.</p></div>
     <span class="muted">Se incluyen automáticamente en el cierre</span>
   </div>
-  <form action="{{ url_for('register_expense') }}" method="post" class="expense-quick-form" data-offline-operation="expense">
+  <form action="{{ url_for('register_expense') }}" method="post" class="expense-quick-form">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <label>Descripción<input name="description" maxlength="180" required placeholder="Ej.: hielo, seguridad, proveedor..."></label>
     <label>Monto<input name="amount" inputmode="decimal" required placeholder="0"></label>
@@ -293,7 +293,7 @@
 <div class="modal" id="rrpp-benefit-modal" aria-hidden="true"><div class="modal-backdrop" data-modal-close></div><section class="modal-card"><button class="modal-close" data-modal-close aria-label="Cerrar">×</button><p class="eyebrow">VOUCHER DE CONSUMICIÓN RRPP</p><h2>1 consumición · $0</h2><p class="muted">Elegí la bebida que se entrega. El comentario es opcional y sirve, por ejemplo, para anotar el nombre del beneficiario. Siempre registra una sola consumición y descuenta el stock.</p><form action="{{ url_for('register_quick_sale') }}" method="post" class="stack-form"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="sale_kind" value="rrpp_benefit"><input type="hidden" name="quantity" value="1"><input type="hidden" name="payment_method" value="other"><label>Bebida<select name="beverage_id" required>{% for group in beverage_groups %}<optgroup label="{{ group['label'] }}">{% for beverage in group['items'] %}<option value="{{ beverage['id'] }}">{{ beverage['name'] }} · {{ beverage['sale_unit'] }}</option>{% endfor %}</optgroup>{% endfor %}</select></label><label>Beneficiario / comentario <small>(opcional)</small><input name="beneficiary_comment" maxlength="120" placeholder="Ej.: Martina Gómez"></label><div class="voucher-fixed-summary"><strong>Valor: $0</strong><span>Cantidad: 1 consumición</span></div><button class="primary-button full" type="submit">Entregar voucher RRPP</button></form></section></div>
 
 {% if birthday_promoters %}
-<div class="modal" id="birthday-discount-modal" aria-hidden="true"><div class="modal-backdrop" data-modal-close></div><section class="modal-card"><button class="modal-close" data-modal-close aria-label="Cerrar">×</button><p class="eyebrow">BENEFICIO CUMPLEAÑOS</p><h2>50% OFF en toda la carta</h2><p class="muted">Válido para el grupo de cumpleaños confirmado hasta las {{ birthday_discount_cutoff_label }}. La venta suma recaudación, descuenta stock y se registra operativamente como efectivo.</p><form action="{{ url_for('register_quick_sale') }}" method="post" data-offline-operation="quick_sale" class="stack-form"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="sale_kind" value="birthday_discount"><input type="hidden" name="payment_method" value="cash"><div class="form-grid-2"><label>Cumpleaños<select name="birthday_promoter_id" required>{% for birthday in birthday_promoters %}<option value="{{ birthday['id'] }}">{{ birthday['birthday_person_name'] }} · {{ birthday['checked_count'] }} ingresaron</option>{% endfor %}</select></label><label>Bebida<select name="beverage_id" required>{% for group in beverage_groups %}<optgroup label="{{ group['label'] }}">{% for beverage in group['items'] %}<option value="{{ beverage['id'] }}">{{ beverage['name'] }} · precio normal {{ beverage['price']|money }}</option>{% endfor %}</optgroup>{% endfor %}</select></label></div><label>Cantidad<select name="quantity">{% for number in range(1, 21) %}<option value="{{ number }}">{{ number }}</option>{% endfor %}</select></label><button class="primary-button full" type="submit">Aplicar 50% y registrar venta</button></form></section></div>
+<div class="modal" id="birthday-discount-modal" aria-hidden="true"><div class="modal-backdrop" data-modal-close></div><section class="modal-card"><button class="modal-close" data-modal-close aria-label="Cerrar">×</button><p class="eyebrow">BENEFICIO CUMPLEAÑOS</p><h2>50% OFF en toda la carta</h2><p class="muted">Válido para el grupo de cumpleaños confirmado hasta las {{ birthday_discount_cutoff_label }}. La venta suma recaudación, descuenta stock y se registra operativamente como efectivo.</p><form action="{{ url_for('register_quick_sale') }}" method="post" class="stack-form"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="sale_kind" value="birthday_discount"><input type="hidden" name="payment_method" value="cash"><div class="form-grid-2"><label>Cumpleaños<select name="birthday_promoter_id" required>{% for birthday in birthday_promoters %}<option value="{{ birthday['id'] }}">{{ birthday['birthday_person_name'] }} · {{ birthday['checked_count'] }} ingresaron</option>{% endfor %}</select></label><label>Bebida<select name="beverage_id" required>{% for group in beverage_groups %}<optgroup label="{{ group['label'] }}">{% for beverage in group['items'] %}<option value="{{ beverage['id'] }}">{{ beverage['name'] }} · precio normal {{ beverage['price']|money }}</option>{% endfor %}</optgroup>{% endfor %}</select></label></div><label>Cantidad<select name="quantity">{% for number in range(1, 21) %}<option value="{{ number }}">{{ number }}</option>{% endfor %}</select></label><button class="primary-button full" type="submit">Aplicar 50% y registrar venta</button></form></section></div>
 {% endif %}
 {% endif %}
 

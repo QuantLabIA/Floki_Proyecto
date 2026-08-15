@@ -68,7 +68,7 @@ DATA_DIR = BASE_DIR / "data"
 BACKUP_DIR = BASE_DIR / "backups"
 DATABASE = DATA_DIR / "floki.db"
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
-APP_VERSION = "2.10.6"
+APP_VERSION = "2.10.7"
 ARGENTINA_TZ = ZoneInfo("America/Argentina/Buenos_Aires")
 
 PAYMENT_METHODS = {"cash", "mercadopago", "transfer", "debit", "credit", "other"}
@@ -188,14 +188,9 @@ def add_security_headers(response):
     response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
     response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
     response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
-    offline_shell = (
-        request.path in {"/offline", "/service-worker.js", "/manifest.webmanifest"}
-        or request.path.startswith("/offline-app/")
-        or request.path.startswith("/floki-offline/")
-        or request.path.startswith("/static/")
-    )
-    # HTML dinámico, login y datos privados nunca deben persistirse en la caché de la PWA.
-    if not offline_shell and (response.mimetype == "text/html" or session.get("user_id") or request.path.startswith(("/api/", "/history", "/stock", "/promoter", "/login", "/logout"))):
+    static_or_manifest = request.path.startswith("/static/") or request.path == "/manifest.webmanifest"
+    # v2.10.7: Floki es exclusivamente online. HTML dinámico, login y datos privados nunca se cachean.
+    if not static_or_manifest and (response.mimetype == "text/html" or session.get("user_id") or request.path.startswith(("/api/", "/history", "/stock", "/promoter", "/login", "/logout"))):
         response.headers["Cache-Control"] = "no-store, private, max-age=0"
         response.headers["Pragma"] = "no-cache"
         response.headers["Expires"] = "0"
@@ -1097,22 +1092,6 @@ def init_db():
                 UNIQUE(parent_movement_id, beverage_product_id, reason)
             );
 
-            CREATE TABLE IF NOT EXISTS offline_operations (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                operation_id TEXT NOT NULL UNIQUE,
-                cash_session_id INTEGER NOT NULL,
-                operation_type TEXT NOT NULL,
-                payload_json TEXT NOT NULL,
-                status TEXT NOT NULL DEFAULT 'pending',
-                result_json TEXT,
-                client_created_at TEXT NOT NULL,
-                synced_at TEXT NOT NULL,
-                created_by INTEGER NOT NULL,
-                device_id TEXT NOT NULL,
-                FOREIGN KEY(cash_session_id) REFERENCES cash_sessions(id),
-                FOREIGN KEY(created_by) REFERENCES users(id)
-            );
-
             CREATE INDEX IF NOT EXISTS idx_movements_session ON movements(cash_session_id);
             CREATE INDEX IF NOT EXISTS idx_movements_created_at ON movements(created_at);
             CREATE INDEX IF NOT EXISTS idx_beverage_stock_adjustments_session ON beverage_stock_adjustments(cash_session_id);
@@ -1122,8 +1101,6 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_promoter_guests_normalized ON promoter_guests(cash_session_id, normalized_name);
             CREATE INDEX IF NOT EXISTS idx_guest_checkins_session ON guest_checkins(cash_session_id);
             CREATE INDEX IF NOT EXISTS idx_beverage_stock_session ON beverage_stock(cash_session_id);
-            CREATE INDEX IF NOT EXISTS idx_offline_operations_session ON offline_operations(cash_session_id);
-            CREATE INDEX IF NOT EXISTS idx_offline_operations_device ON offline_operations(device_id, status);
             """
         )
 
@@ -1326,18 +1303,6 @@ def current_sector():
 
 @app.before_request
 def load_logged_in_user_and_csrf():
-    # Las rutas de recuperación/shell offline deben poder responder aunque la sesión o la DB
-    # tengan un problema. No contienen datos privados; los datos operativos llegan por API autenticada.
-    public_offline_shell = (
-        request.path.startswith("/floki-offline/")
-        or request.path in {"/floki-offline-test", "/floki-offline-reset", "/offline-recover"}
-    )
-    if public_offline_shell:
-        g.user = None
-        if "csrf_token" not in session:
-            session["csrf_token"] = secrets.token_hex(24)
-        return None
-
     user_id = session.get("user_id")
     g.user = get_db().execute("SELECT * FROM users WHERE id = ? AND active = 1", (user_id,)).fetchone() if user_id else None
     if "csrf_token" not in session:
@@ -4120,434 +4085,6 @@ def toggle_beverage(beverage_id):
 
 
 
-def offline_bootstrap_payload():
-    cash = get_open_cash_session()
-    user = g.user
-    payload = {
-        "version": APP_VERSION,
-        "server_time": now_iso(),
-        "server_epoch_ms": int(datetime.now(timezone.utc).timestamp() * 1000),
-        "csrf_token": session.get("csrf_token"),
-        "user": {
-            "id": user["id"],
-            "name": user["name"],
-            "username": user["username"],
-            "role": user["role"],
-            "sector": current_sector(),
-        },
-        "cash_session": None,
-        "entry_prices": [],
-        "promoters": [],
-        "ticketing_products": [],
-        "beverages": [],
-        "guests": [],
-        "birthdays": [],
-    }
-    if not cash:
-        return payload
-    payload["cash_session"] = {
-        "id": cash["id"],
-        "event_name": cash["event_name"],
-        "event_date": cash["event_date"],
-        "capacity": cash["capacity"],
-        "opened_at": cash["opened_at"],
-    }
-    sector = current_sector()
-    show_ticketing = user["role"] == "admin" or sector == "ticketing"
-    show_beverages = user["role"] == "admin" or sector == "beverages"
-    if show_ticketing:
-        payload["entry_prices"] = [
-            {
-                "category": row["category"],
-                "label": row["label"],
-                "cutoff_time": row["cutoff_time"],
-                "before_price": float(row["before_price"]),
-                "after_price": float(row["after_price"]),
-            }
-            for row in get_db().execute(
-                "SELECT * FROM entry_prices WHERE active=1 AND category='general' ORDER BY category"
-            ).fetchall()
-        ]
-        payload["promoters"] = [
-            {"id": row["id"], "name": row["name"]}
-            for row in get_db().execute(
-                "SELECT id, name FROM promoters WHERE active=1 AND is_common=0 AND is_promo=0 ORDER BY name COLLATE NOCASE"
-            ).fetchall()
-        ]
-        payload["ticketing_products"] = [
-            {"id": row["id"], "name": row["name"], "price": float(row["price"])}
-            for row in get_db().execute(
-                "SELECT * FROM ticketing_products WHERE active=1 ORDER BY sort_order, name COLLATE NOCASE"
-            ).fetchall()
-        ]
-        payload["guests"] = [
-            {
-                "guest_id": row["guest_id"],
-                "guest_name": row["guest_name"],
-                "normalized_name": row["normalized_name"],
-                "promoter_id": row["promoter_id"],
-                "promoter_name": row["promoter_name"],
-                "is_common": bool(row["is_common"]),
-                "is_promo": bool(row["is_promo"]),
-                "is_birthday": bool(row["is_birthday"]),
-                "checked_in": bool(row["checkin_id"]),
-                "checked_in_at": row["checked_in_at"],
-            }
-            for row in get_db().execute(
-                """SELECT pg.id AS guest_id, pg.guest_name, pg.normalized_name, pg.promoter_id,
-                          p.name AS promoter_name, p.is_common, p.is_promo, p.is_birthday,
-                          gc.id AS checkin_id, gc.checked_in_at
-                   FROM promoter_guests pg
-                   JOIN promoters p ON p.id=pg.promoter_id
-                   LEFT JOIN guest_checkins gc
-                     ON gc.cash_session_id=pg.cash_session_id AND gc.normalized_name=pg.normalized_name
-                   WHERE pg.cash_session_id=?
-                   ORDER BY pg.guest_name COLLATE NOCASE, p.name COLLATE NOCASE""",
-                (cash["id"],),
-            ).fetchall()
-        ]
-    if show_beverages:
-        beverage_rows = get_db().execute(
-            "SELECT * FROM beverage_products WHERE active=1 ORDER BY name COLLATE NOCASE"
-        ).fetchall()
-        current_sold = beverage_paid_sales_by_product(cash["id"])
-        previous_product_sales, previous_category_sales = previous_event_beverage_ranking(cash["id"])
-        grouped = group_beverages(
-            beverage_rows,
-            product_ranking=previous_product_sales,
-            category_ranking=previous_category_sales,
-            sold_counts=current_sold,
-        )
-        ordered_beverages = [item for group in grouped for item in group["items"]]
-        payload["beverages"] = [
-            {
-                "id": row["id"],
-                "name": row["name"],
-                "price": float(row["price"]),
-                "sale_unit": row["sale_unit"],
-                "stock_unit": row["stock_unit"],
-                "beverage_type": row["beverage_type"],
-                "brand": row["brand"],
-                "presentation": row["presentation"],
-                "sold_count": int(row.get("sold_count", 0) or 0),
-                "previous_sold_count": int(row.get("previous_sold_count", 0) or 0),
-                "is_speed": bool(row.get("is_speed")),
-                "category": infer_beverage_category(row.get("beverage_type"), row.get("brand"), row.get("sale_unit"), row.get("name")),
-            }
-            for row in ordered_beverages
-        ]
-        payload["birthdays"] = [
-            {
-                "promoter_id": row["id"],
-                "birthday_person_name": row["birthday_person_name"],
-                "checked_count": row["checked_count"],
-                "birthday_checked_in": bool(row["birthday_checked"]),
-            }
-            for row in birthday_promoter_statuses(get_db(), cash["id"])
-        ]
-    return payload
-
-
-@app.get("/api/offline/bootstrap")
-@login_required
-def offline_bootstrap():
-    response = jsonify(offline_bootstrap_payload())
-    response.headers["Cache-Control"] = "no-store, private"
-    return response
-
-
-def offline_result_from_row(row):
-    result = {}
-    if row and row["result_json"]:
-        try:
-            result = json.loads(row["result_json"])
-        except (TypeError, json.JSONDecodeError):
-            result = {"message": str(row["result_json"])}
-    return {
-        "operation_id": row["operation_id"],
-        "status": row["status"],
-        "result": result,
-    }
-
-
-@app.post("/api/offline/sync")
-@login_required
-def offline_sync():
-    body = request.get_json(silent=True) or {}
-    operations = body.get("operations") or []
-    device_id = str(body.get("device_id") or "").strip()[:100]
-    if not device_id or not isinstance(operations, list):
-        return jsonify({"ok": False, "error": "Solicitud offline inválida"}), 400
-    if len(operations) > 100:
-        return jsonify({"ok": False, "error": "Sincronizá como máximo 100 operaciones por vez"}), 400
-
-    results = []
-    db = get_db()
-    for item in operations:
-        operation_id = str((item or {}).get("operation_id") or "").strip()[:80]
-        operation_type = str((item or {}).get("operation_type") or "").strip()[:40]
-        payload = (item or {}).get("payload") or {}
-        cash_session_id = (item or {}).get("cash_session_id")
-        client_created_at = operation_time_iso((item or {}).get("created_at"), (item or {}).get("created_at_epoch_ms"))
-        original_user_id = (item or {}).get("user_id")
-        if not operation_id or not re.fullmatch(r"[A-Za-z0-9._:-]{12,80}", operation_id):
-            results.append({"operation_id": operation_id, "status": "conflict", "result": {"message": "Identificador offline inválido"}})
-            continue
-
-        existing = db.execute("SELECT * FROM offline_operations WHERE operation_id=?", (operation_id,)).fetchone()
-        if existing and existing["status"] in {"applied", "conflict"}:
-            results.append(offline_result_from_row(existing))
-            continue
-        if existing:
-            db.execute("DELETE FROM offline_operations WHERE operation_id=?", (operation_id,))
-            db.commit()
-
-        status = "applied"
-        result = {}
-        try:
-            if int(original_user_id or 0) != int(g.user["id"]):
-                raise ValueError("Esta operación fue creada por otro usuario. Iniciá sesión con ese usuario para sincronizarla")
-            cash = get_open_cash_session()
-            if not cash or int(cash["id"]) != int(cash_session_id or 0):
-                raise ValueError("El evento original ya no está abierto. La operación quedó en conflicto para revisión")
-            db.execute(
-                """INSERT INTO offline_operations(
-                       operation_id, cash_session_id, operation_type, payload_json, status,
-                       result_json, client_created_at, synced_at, created_by, device_id
-                   ) VALUES (?, ?, ?, ?, 'processing', NULL, ?, ?, ?, ?)""",
-                (operation_id, cash["id"], operation_type, json.dumps(payload, ensure_ascii=False), client_created_at, now_iso(), g.user["id"], device_id),
-            )
-            if operation_type == "quick_sale":
-                result = perform_quick_sale(db, cash, g.user, payload, created_at=client_created_at)
-            elif operation_type == "guest_checkin":
-                guest_id = positive_int(payload.get("guest_id"), "La persona", maximum=1000000)
-                result = perform_guest_checkin(db, cash, g.user, guest_id, created_at=client_created_at)
-            elif operation_type == "expense":
-                result = perform_expense(db, cash, g.user, payload, created_at=client_created_at)
-            else:
-                raise ValueError("Tipo de operación offline no compatible")
-            db.execute(
-                "UPDATE offline_operations SET status='applied', result_json=?, synced_at=? WHERE operation_id=?",
-                (json.dumps(result, ensure_ascii=False), now_iso(), operation_id),
-            )
-            db.commit()
-        except PermissionError as exc:
-            db.rollback()
-            status = "conflict"
-            result = {"message": str(exc)}
-        except (ValueError, TypeError, *DB_INTEGRITY_ERRORS) as exc:
-            db.rollback()
-            status = "conflict"
-            result = {"message": str(exc)}
-        except Exception:
-            db.rollback()
-            app.logger.exception("Error temporal sincronizando la operación offline %s", operation_id)
-            status = "retry"
-            result = {"message": "Error temporal al sincronizar. Se volverá a intentar"}
-
-        if status != "applied":
-            try:
-                db.execute(
-                    """INSERT INTO offline_operations(
-                           operation_id, cash_session_id, operation_type, payload_json, status,
-                           result_json, client_created_at, synced_at, created_by, device_id
-                       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (
-                        operation_id, int(cash_session_id or 0), operation_type,
-                        json.dumps(payload, ensure_ascii=False), status,
-                        json.dumps(result, ensure_ascii=False), client_created_at,
-                        now_iso(), g.user["id"], device_id,
-                    ),
-                )
-                db.commit()
-            except DB_INTEGRITY_ERRORS:
-                db.rollback()
-                existing = db.execute("SELECT * FROM offline_operations WHERE operation_id=?", (operation_id,)).fetchone()
-                if existing:
-                    results.append(offline_result_from_row(existing))
-                    continue
-            except Exception:
-                db.rollback()
-        results.append({"operation_id": operation_id, "status": status, "result": result})
-
-    summary = {
-        "applied": sum(1 for row in results if row["status"] == "applied"),
-        "conflicts": sum(1 for row in results if row["status"] == "conflict"),
-        "retry": sum(1 for row in results if row["status"] == "retry"),
-    }
-    return jsonify({"ok": True, "results": results, "summary": summary, "bootstrap": offline_bootstrap_payload()})
-
-
-@app.get("/floki-offline/")
-def floki_offline_app():
-    # v2.10.6: se mantiene el namespace aislado para escapar de Service Workers/cachés antiguos de /offline-app/.
-    response = render_template("floki_offline.html")
-    response = Response(response, mimetype="text/html")
-    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
-    response.headers["Pragma"] = "no-cache"
-    response.headers["Expires"] = "0"
-    return response
-
-
-@app.get("/floki-offline/assets/<path:asset_name>")
-def floki_offline_asset(asset_name):
-    allowed = {
-        "offline-sync.js": "offline-sync.js",
-        "offline-page.js": "offline-page.js",
-        "icon-192.png": "icon-192.png",
-        "icon-512.png": "icon-512.png",
-        "floki-logo-white.png": "floki-logo-white.png",
-    }
-    filename = allowed.get(asset_name)
-    if not filename:
-        abort(404)
-    mimetype = "application/javascript" if filename.endswith(".js") else None
-    response = send_from_directory(BASE_DIR / "static" / "floki_offline", filename, mimetype=mimetype)
-    response.headers["Cache-Control"] = "no-store" if filename.endswith(".js") else "public, max-age=3600"
-    return response
-
-
-@app.get("/floki-offline/manifest.webmanifest")
-def floki_offline_manifest():
-    response = send_from_directory(BASE_DIR / "static" / "floki_offline", "manifest.webmanifest", mimetype="application/manifest+json")
-    response.headers["Cache-Control"] = "no-store"
-    return response
-
-
-@app.get("/floki-offline/service-worker.js")
-def floki_offline_service_worker():
-    response = send_from_directory(BASE_DIR / "static" / "floki_offline", "service-worker.js", mimetype="application/javascript")
-    response.headers["Service-Worker-Allowed"] = "/floki-offline/"
-    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
-    return response
-
-
-@app.get("/floki-offline-test")
-def floki_offline_test():
-    # Ruta deliberadamente sin JS/CSS: sirve para comprobar la versión desplegada en Railway antes de probar la PWA.
-    html = f"""<!doctype html><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><body style='background:#050508;color:#fff;font:16px -apple-system,BlinkMacSystemFont,system-ui;padding:28px'><h1>Floki Offline OK</h1><p>Versión {APP_VERSION}</p><p>Si ves esto, Railway está sirviendo el código nuevo y esta ruta no depende de Service Worker.</p><p><a style='color:#d39aff' href='/floki-offline/?fresh=1'>Abrir Floki Offline</a></p></body>"""
-    response = Response(html, mimetype="text/html")
-    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
-    return response
-
-
-@app.get("/floki-offline-reset")
-def floki_offline_reset():
-    # Fuera del scope nuevo y viejo. Desregistra workers offline sin borrar IndexedDB/ventas pendientes.
-    html = """<!doctype html><html lang='es'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Floki · Reset offline</title><style>*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:#050508;color:#fff;font-family:-apple-system,BlinkMacSystemFont,system-ui;padding:24px}.box{max-width:680px;border:1px solid #2c2636;border-radius:18px;padding:24px;background:#111017}a{color:#d39aff}</style></head><body><main class='box'><h1>Reparando Floki Offline…</h1><p id='s'>Quitando Service Workers y cachés viejas. No se borra IndexedDB.</p><p><a href='/floki-offline-test'>Comprobar versión</a></p></main><script>(async()=>{try{if('serviceWorker'in navigator){const rs=await navigator.serviceWorker.getRegistrations();await Promise.all(rs.filter(r=>{try{const p=new URL(r.scope).pathname;return p.startsWith('/offline-app/')||p.startsWith('/floki-offline/')||p==='/';}catch(_){return false;}}).map(r=>r.unregister()));}if('caches'in window){const ks=await caches.keys();await Promise.all(ks.filter(k=>k.startsWith('floki-offline-')||k.startsWith('floki-offline-app-')||k.startsWith('floki-manager-')).map(k=>caches.delete(k)));}document.getElementById('s').textContent='Listo. No se borraron las operaciones guardadas en IndexedDB.';}catch(e){document.getElementById('s').textContent='Limpieza parcial. Podés continuar con la prueba de versión.';}})();</script></body></html>"""
-    response = Response(html, mimetype="text/html")
-    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
-    return response
-
-
-@app.get("/offline-app/")
-def offline_app():
-    # Shell intencionalmente sin datos privados: todo el catálogo/evento vive en IndexedDB.
-    # Esto permite cachearlo sin que el Service Worker tenga alcance sobre el resto de Floki.
-    response = render_template("offline_app.html")
-    response = Response(response, mimetype="text/html")
-    response.headers["Cache-Control"] = "no-cache, max-age=0"
-    return response
-
-
-@app.get("/offline-app/assets/<path:asset_name>")
-def offline_app_asset(asset_name):
-    allowed = {
-        "app.css": "app.css",
-        "offline-sync.js": "offline-sync.js",
-        "offline-page.js": "offline-page.js",
-        "icon-192.png": "icon-192.png",
-        "icon-512.png": "icon-512.png",
-        "floki-logo-white.png": "floki-logo-white.png",
-    }
-    filename = allowed.get(asset_name)
-    if not filename:
-        abort(404)
-    mimetype = None
-    if filename.endswith(".js"):
-        mimetype = "application/javascript"
-    elif filename.endswith(".css"):
-        mimetype = "text/css"
-    response = send_from_directory(BASE_DIR / "static" / "offline_app", filename, mimetype=mimetype)
-    response.headers["Cache-Control"] = "public, max-age=3600"
-    return response
-
-
-@app.get("/offline-app/manifest.webmanifest")
-def offline_app_manifest():
-    response = send_from_directory(BASE_DIR / "static" / "offline_app", "manifest.webmanifest", mimetype="application/manifest+json")
-    response.headers["Cache-Control"] = "no-cache"
-    return response
-
-
-@app.get("/offline-app/service-worker.js")
-def offline_app_service_worker():
-    response = send_from_directory(BASE_DIR / "static" / "offline_app", "service-worker.js", mimetype="application/javascript")
-    # El script vive debajo de /offline-app/: por diseño jamás puede controlar /, dashboard, login o reportes.
-    response.headers["Service-Worker-Allowed"] = "/offline-app/"
-    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
-    return response
-
-
-@app.get("/offline-recover")
-def offline_recover():
-    # Ruta fuera del scope /offline-app/: permite reparar un Service Worker/caché offline
-    # aunque el propio shell offline haya quedado inutilizable. No borra IndexedDB ni la cola.
-    html = """<!doctype html>
-<html lang='es'>
-<head>
-  <meta charset='utf-8'>
-  <meta name='viewport' content='width=device-width,initial-scale=1,viewport-fit=cover'>
-  <meta name='theme-color' content='#050508'>
-  <title>Floki · Reparar modo offline</title>
-  <style>
-    *{box-sizing:border-box}html,body{min-height:100%;margin:0;background:#050508;color:#f8f7fb;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}
-    body{display:grid;place-items:center;padding:24px}.box{width:min(680px,100%);padding:24px;border:1px solid #2c2636;border-radius:18px;background:#111017}
-    .eyebrow{margin:0 0 8px;color:#d39aff;font-size:12px;font-weight:800;letter-spacing:.14em}.muted{color:#aaa4b3;line-height:1.55}
-    a{color:#fff}.button{display:inline-block;margin-top:12px;padding:12px 16px;border-radius:12px;background:#7d24ef;color:#fff;text-decoration:none;font-weight:800}
-  </style>
-</head>
-<body>
-  <main class='box'>
-    <p class='eyebrow'>FLOKI MANAGER · RECUPERACIÓN OFFLINE</p>
-    <h1>Reparando el modo sin conexión…</h1>
-    <p id='status' class='muted'>Quitando únicamente el Service Worker y la caché del módulo offline. Tus operaciones pendientes guardadas en IndexedDB no se borran.</p>
-    <a id='continue' class='button' href='/offline-app/?manual=1' style='display:none'>Abrir Floki Offline</a>
-  </main>
-  <script>
-  (async()=>{
-    const status=document.getElementById('status');
-    const button=document.getElementById('continue');
-    let message='Caché offline reparada.';
-    try{
-      if('serviceWorker' in navigator){
-        const regs=await navigator.serviceWorker.getRegistrations();
-        await Promise.all(regs.filter((reg)=>{
-          try{return new URL(reg.scope).pathname.startsWith('/offline-app/');}catch(_){return false;}
-        }).map((reg)=>reg.unregister()));
-      }
-      if('caches' in window){
-        const keys=await caches.keys();
-        await Promise.all(keys.filter((key)=>key.startsWith('floki-offline-app-')||key.startsWith('floki-manager-')).map((key)=>caches.delete(key)));
-      }
-    }catch(error){message='La limpieza terminó parcialmente, pero ya podés volver a abrir el modo offline.';}
-    status.textContent=message+' No se borraron ventas pendientes ni datos operativos locales.';
-    button.style.display='inline-block';
-    setTimeout(()=>location.replace('/offline-app/?recovered='+Date.now()),700);
-  })();
-  </script>
-</body>
-</html>"""
-    response = Response(html, mimetype="text/html")
-    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
-    return response
-
-
-@app.get("/offline-operations")
-def offline_operations_page():
-    # Compatibilidad con favoritos/pruebas de v2.10.0.
-    return redirect(url_for("offline_app"))
-
 
 @app.route("/api/status")
 @login_required
@@ -4601,10 +4138,10 @@ def diagnostic():
         "database": "postgresql" if db.is_postgres else "sqlite",
         "user": {"id": g.user["id"], "username": g.user["username"], "role": g.user["role"], "sector": g.user["sector"]},
         "checks": checks,
-        "offline_safe_stage": 3,
-        "offline_temporarily_disabled": False,
-        "offline_mode": "isolated",
-        "offline_scope": "/floki-offline/",
+        "offline_safe_stage": 0,
+        "offline_temporarily_disabled": True,
+        "offline_mode": "removed",
+        "connection_mode": "online_only",
     }), (200 if ok else 500)
 
 
@@ -4630,21 +4167,18 @@ def manifest():
 
 @app.route("/service-worker.js")
 def service_worker():
+    # Compatibilidad de limpieza: un navegador que conserve un worker antiguo recibe
+    # un worker vacío que borra las cachés Floki y se desregistra. La app ya no lo registra.
     response = send_from_directory(app.static_folder, "service-worker.js", mimetype="application/javascript")
     response.headers["Service-Worker-Allowed"] = "/"
-    response.headers["Cache-Control"] = "no-cache"
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
     return response
-
-
-@app.route("/offline")
-def offline():
-    return render_template("offline.html")
 
 
 @app.route("/pwa-reset")
 def pwa_reset():
     """Pantalla autocontenida para retirar Service Workers/cachés viejas en iPhone."""
-    html = """<!doctype html><html lang='es'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Floki · Recuperar app</title></head><body style='margin:0;padding:28px;background:#09070d;color:#fff;font-family:system-ui,sans-serif'><main style='max-width:680px;margin:auto'><p style='color:#c66cff;font-weight:800;letter-spacing:.08em'>FLOKI MANAGER</p><h1>Recuperando la aplicación…</h1><p id='status'>Quitando la caché offline anterior.</p><p><a id='continue' href='/login' style='display:none;color:#fff;background:#8d35ff;padding:12px 16px;border-radius:12px;text-decoration:none;font-weight:700'>Volver a Floki</a></p><script>(async()=>{let msg='Limpieza completada.';try{if('serviceWorker' in navigator){const regs=await navigator.serviceWorker.getRegistrations();await Promise.all(regs.filter(r=>{try{return new URL(r.scope).pathname==='/';}catch(_){return false;}}).map(r=>r.unregister()));}if('caches' in window){const keys=await caches.keys();await Promise.all(keys.filter(k=>k.startsWith('floki-manager-')).map(k=>caches.delete(k)));}}catch(e){msg='La limpieza automática terminó parcialmente. Podés volver a Floki.';}document.getElementById('status').textContent=msg;document.getElementById('continue').style.display='inline-block';setTimeout(()=>location.replace('/login'),900);} )();</script></main></body></html>"""
+    html = """<!doctype html><html lang='es'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Floki · Recuperar app</title></head><body style='margin:0;padding:28px;background:#09070d;color:#fff;font-family:system-ui,sans-serif'><main style='max-width:680px;margin:auto'><p style='color:#c66cff;font-weight:800;letter-spacing:.08em'>FLOKI MANAGER</p><h1>Recuperando la aplicación…</h1><p id='status'>Quitando Service Workers y cachés antiguas de Floki.</p><p><a id='continue' href='/login' style='display:none;color:#fff;background:#8d35ff;padding:12px 16px;border-radius:12px;text-decoration:none;font-weight:700'>Volver a Floki</a></p><script>(async()=>{let msg='Limpieza completada. Floki queda en modo solo Internet.';try{if('serviceWorker' in navigator){const regs=await navigator.serviceWorker.getRegistrations();await Promise.all(regs.filter(r=>{try{const p=new URL(r.scope).pathname;return p==='/'||p.startsWith('/offline-app/')||p.startsWith('/floki-offline/');}catch(_){return false;}}).map(r=>r.unregister()));}if('caches' in window){const keys=await caches.keys();await Promise.all(keys.filter(k=>k.startsWith('floki-manager-')||k.startsWith('floki-offline-')||k.startsWith('floki-offline-app-')).map(k=>caches.delete(k)));}}catch(e){msg='La limpieza automática terminó parcialmente. Podés volver a Floki y reintentar si fuera necesario.';}document.getElementById('status').textContent=msg;document.getElementById('continue').style.display='inline-block';setTimeout(()=>location.replace('/login'),900);} )();</script></main></body></html>"""
     response = Response(html, mimetype="text/html")
     response.headers["Cache-Control"] = "no-store, private, max-age=0"
     return response

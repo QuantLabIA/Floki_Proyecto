@@ -24,10 +24,6 @@
     </div>
   </article>
 
-  <article class="card wide-card" id="modo-offline">
-    <div class="section-heading"><div><p class="eyebrow">MODO SIN CONEXIÓN</p><h2>Offline aislado</h2><p class="muted compact-copy">El módulo offline funciona separado de Floki normal. Si un iPhone queda con la pantalla blanca, Reparar caché elimina únicamente el Service Worker/caché offline y conserva la cola local de operaciones.</p></div><span class="section-link-group"><a href="{{ url_for('offline_app') }}">Abrir offline</a><a href="{{ url_for('offline_recover') }}">Reparar caché</a></span></div>
-  </article>
-
   <article class="card wide-card" id="precios">
     <div class="section-heading"><div><p class="eyebrow">PRECIOS DE ENTRADAS</p><h2>Antes y después del horario</h2><p class="muted compact-copy">La caja elige automáticamente el precio de la entrada general. FREE se confirma exclusivamente desde las listas; VIP y anticipada fueron eliminadas.</p></div></div>
     <form action="{{ url_for('update_prices') }}" method="post" class="stack-form" data-ajax-price-settings>

@@ -21,7 +21,6 @@
 
   <div class="pwa-controls" aria-live="polite">
     <span class="network-status online" data-network-status><i></i><span>En línea</span></span>
-    {% if g.user %}<a class="offline-queue-button" href="{{ url_for('offline_app') }}" data-offline-bridge-link>Modo offline <strong data-offline-bridge-pending>0</strong></a>{% endif %}
     <button type="button" class="install-app-button" data-install-app hidden>Instalar app</button>
   </div>
 
@@ -87,7 +86,10 @@
   </nav>
   {% endif %}
 
+  <script>
+  // v2.10.7: retiro silencioso de Service Workers/cachés heredadas. Floki funciona solo con Internet.
+  window.addEventListener('load',()=>{(async()=>{try{if('serviceWorker'in navigator){const regs=await navigator.serviceWorker.getRegistrations();await Promise.all(regs.filter(r=>{try{const p=new URL(r.scope).pathname;return p==='/'||p.startsWith('/offline-app/')||p.startsWith('/floki-offline/');}catch(_){return false;}}).map(r=>r.unregister()));}if('caches'in window){const keys=await caches.keys();await Promise.all(keys.filter(k=>k.startsWith('floki-manager-')||k.startsWith('floki-offline-')||k.startsWith('floki-offline-app-')).map(k=>caches.delete(k)));}}catch(_){}})();},{once:true});
+  </script>
   <script src="{{ url_for('static', filename='js/app.js', v=app_version) }}" defer></script>
-  {% if g.user %}<script src="{{ url_for('static', filename='js/offline-bridge.js', v=app_version) }}" defer></script>{% endif %}
 </body>
 </html>
