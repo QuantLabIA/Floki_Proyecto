@@ -53,18 +53,7 @@
 
   const prepare = async () => {
     try {
-      // Retira únicamente workers antiguos con alcance raíz. Nunca toca /offline-app/.
-      if ('serviceWorker' in navigator) {
-        const registrations = await navigator.serviceWorker.getRegistrations();
-        await Promise.all(registrations.filter((registration) => {
-          try { return new URL(registration.scope).pathname === '/'; } catch (_) { return false; }
-        }).map((registration) => registration.unregister()));
-        await navigator.serviceWorker.register('/offline-app/service-worker.js?v=2.10.3', { scope: '/offline-app/' });
-      }
-      if ('caches' in window) {
-        const keys = await caches.keys();
-        await Promise.all(keys.filter((key) => key.startsWith('floki-manager-')).map((key) => caches.delete(key)));
-      }
+      // v2.10.5: este puente solo prepara IndexedDB/bootstrap. Nunca registra Service Workers.
       if (navigator.onLine) {
         const response = await fetch('/api/offline/bootstrap', { credentials: 'same-origin', cache: 'no-store', headers: { Accept: 'application/json' } });
         if (response.ok && (response.headers.get('content-type') || '').includes('application/json')) {

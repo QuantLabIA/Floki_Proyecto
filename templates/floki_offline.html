@@ -1,3 +1,17 @@
+<!doctype html>
+<html lang="es" data-floki-csrf="">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#08060d">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Floki Offline">
+  <link rel="manifest" href="/floki-offline/manifest.webmanifest">
+  <link rel="icon" href="/floki-offline/assets/icon-192.png" type="image/png">
+  <link rel="apple-touch-icon" href="/floki-offline/assets/icon-192.png">
+  <style>
 :root {
   --bg: #050508;
   --bg-soft: #09080d;
@@ -269,8 +283,6 @@ select { color-scheme: dark; }
 .button-row, .heading-actions, .actions, .section-link-group { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; }
 .section-link-group a { color: var(--violet-soft); font-size: .75rem; font-weight: 800; }
 .tiny-danger { min-height: 32px; padding: 6px 9px; border: 1px solid rgba(255,101,125,.25); border-radius: 9px; color: #ff8b9e; background: rgba(255,101,125,.06); cursor: pointer; }
-.movement-admin-actions { display:flex; flex-wrap:wrap; gap:6px; align-items:center; justify-content:flex-end; }
-.movement-admin-actions form { margin:0; }
 
 /* Flash */
 .flash-stack { position: fixed; z-index: 200; top: 88px; right: 18px; display: grid; gap: 8px; width: min(360px, calc(100% - 36px)); }
@@ -1641,3 +1653,147 @@ body.app-page .admin-quick-tabs {
   .settings-close-cash-layout { grid-template-columns: 1fr; }
   .settings-close-cash-action, .settings-close-button { width: 100%; min-width: 0; }
 }
+
+
+/* v2.10.3 · iPhone/iPad render seguro para el módulo aislado. */
+body.offline-operations-page {
+  min-height: 100vh !important;
+  background: #050508 !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+body.offline-operations-page::before,
+body.offline-operations-page .ambient {
+  display: none !important;
+  filter: none !important;
+  -webkit-filter: none !important;
+  mask-image: none !important;
+  -webkit-mask-image: none !important;
+}
+body.offline-operations-page .offline-shell {
+  opacity: 1 !important;
+  visibility: visible !important;
+  transform: none !important;
+  -webkit-transform: none !important;
+}
+body.offline-operations-page .card,
+body.offline-operations-page .offline-header,
+body.offline-operations-page .offline-event,
+body.offline-operations-page .offline-queue-summary,
+body.offline-operations-page .offline-footer {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  background: #111017 !important;
+  box-shadow: 0 10px 30px rgba(0,0,0,.34) !important;
+  transform: none !important;
+  -webkit-transform: none !important;
+}
+body.offline-operations-page .offline-brand img { filter: none !important; -webkit-filter: none !important; }
+
+  </style>
+  <style>
+    /* v2.10.4 · Shell autocontenido + render seguro iPhone/iPad.
+       No depende de CSS externo y puede repararse desde /floki-offline-reset. */
+       El shell offline no usa blur, mask ni compositing pesado: evita la pantalla blanca de WebKit. */
+    html, body { min-height: 100% !important; background: #050508 !important; color: #f8f7fb !important; opacity: 1 !important; visibility: visible !important; }
+    body.offline-operations-page { min-height: 100vh !important; background: #050508 !important; opacity: 1 !important; visibility: visible !important; -webkit-transform: none !important; transform: none !important; }
+    body.offline-operations-page::before,
+    body.offline-operations-page .ambient { display: none !important; filter: none !important; -webkit-filter: none !important; mask-image: none !important; -webkit-mask-image: none !important; }
+    body.offline-operations-page .offline-shell { opacity: 1 !important; visibility: visible !important; transform: none !important; -webkit-transform: none !important; }
+    body.offline-operations-page .card,
+    body.offline-operations-page .offline-header,
+    body.offline-operations-page .offline-event,
+    body.offline-operations-page .offline-queue-summary,
+    body.offline-operations-page .offline-footer {
+      backdrop-filter: none !important;
+      -webkit-backdrop-filter: none !important;
+      background: #111017 !important;
+      box-shadow: 0 10px 30px rgba(0,0,0,.34) !important;
+      transform: none !important;
+      -webkit-transform: none !important;
+    }
+    body.offline-operations-page .offline-brand img { filter: none !important; -webkit-filter: none !important; }
+  </style>
+  <title>Floki Offline · Modo sin conexión</title>
+</head>
+<body class="offline-operations-page" data-offline-operations-page>
+  <div class="ambient ambient-one" aria-hidden="true"></div>
+  <div class="ambient ambient-two" aria-hidden="true"></div>
+  <main class="offline-shell">
+    <header class="offline-header card">
+      <div class="offline-brand">
+        <img src="/floki-offline/assets/floki-logo-white.png" alt="Floki Club">
+        <div><p class="eyebrow">FLOKI MANAGER</p><h1>Offline aislado</h1></div>
+      </div>
+      <span class="network-status" data-network-status><i></i><span>Comprobando red…</span></span>
+    </header>
+
+    <section class="card offline-admin-note" data-offline-install-status>
+      <p class="eyebrow">PROTECCIÓN v2.10.6 · FRESH SCOPE</p>
+      <h2>Preparando este dispositivo…</h2>
+      <p class="muted">Este modo usa un Service Worker limitado únicamente a <strong>/floki-offline/</strong>. No puede controlar el Dashboard, Login, Ajustes, Historial ni Cerrar caja.</p>
+    </section>
+
+    <section class="offline-event card" data-offline-event>
+      <p class="muted">Cargando el último evento guardado en este dispositivo…</p>
+    </section>
+
+    <section class="offline-queue-summary card">
+      <div><p class="eyebrow">COLA LOCAL</p><h2><span data-offline-pending>0</span> pendientes</h2><p class="muted"><span data-offline-conflicts>0</span> conflictos para revisar.</p></div>
+      <button type="button" class="primary-button" data-sync-now>Actualizar / sincronizar</button>
+    </section>
+
+    <section class="offline-operation-area" data-offline-operation-area>
+      <div class="card"><p class="muted">Preparando las operaciones disponibles…</p></div>
+    </section>
+
+    <section class="offline-conflicts card" data-offline-conflict-panel hidden>
+      <div class="section-heading compact"><div><p class="eyebrow">REVISIÓN</p><h2>Operaciones con conflicto</h2></div></div>
+      <div data-offline-conflict-list></div>
+    </section>
+
+    <section class="card offline-admin-note">
+      <p class="eyebrow">IPHONE / IPAD</p>
+      <h2>Acceso de emergencia sin internet</h2>
+      <p class="muted">Con internet, abrí esta pantalla una vez. Para poder abrirla desde cero durante un corte, en Safari usá <strong>Compartir → Agregar a pantalla de inicio</strong>. Ese icono abre solamente Floki Offline.</p>
+    </section>
+
+    <footer class="offline-footer card">
+      <p>Las operaciones quedan guardadas en este dispositivo hasta recuperar conexión. Antes de cerrar caja, todos los dispositivos deben quedar en <strong>0 pendientes</strong>.</p>
+      <div class="button-row"><button type="button" class="secondary-button" data-clear-offline>Borrar datos locales</button><a class="secondary-button" href="/floki-offline-reset">Reparar caché offline</a><a class="secondary-button" href="/">Volver a Floki (online)</a></div>
+    </footer>
+  </main>
+
+  <script>
+  (() => {
+    const status = document.querySelector('[data-network-status]');
+    const install = document.querySelector('[data-offline-install-status]');
+    const updateNetwork = () => {
+      const online = navigator.onLine;
+      status.classList.toggle('online', online);
+      status.classList.toggle('offline', !online);
+      status.querySelector('span').textContent = online ? 'En línea' : 'Sin conexión';
+    };
+    updateNetwork();
+    window.addEventListener('online', updateNetwork);
+    window.addEventListener('offline', updateNetwork);
+
+    const prepareWorker = async () => {
+      if (!('serviceWorker' in navigator)) {
+        install.innerHTML = '<p class="eyebrow">NO DISPONIBLE</p><h2>Este navegador no admite modo offline</h2><p class="muted">Usá Safari actualizado en iPhone/iPad o Chrome/Edge.</p>';
+        return;
+      }
+      try {
+        const registration = await navigator.serviceWorker.register('/floki-offline/service-worker.js?v=2.10.6', { scope: '/floki-offline/' });
+        install.innerHTML = '<p class="eyebrow">MODO AISLADO LISTO</p><h2>Este dispositivo ya puede abrir Floki Offline sin internet</h2><p class="muted">El alcance del Service Worker es <strong>/floki-offline/</strong>. La aplicación principal queda fuera de su control.</p>';
+      } catch (error) {
+        install.innerHTML = '<p class="eyebrow">FALTA PREPARAR</p><h2>No se pudo instalar el modo offline</h2><p class="muted">Revisá la conexión y tocá actualizar. La aplicación principal no se ve afectada.</p>';
+      }
+    };
+    requestAnimationFrame(() => setTimeout(prepareWorker, 350));
+  })();
+  </script>
+  <script src="/floki-offline/assets/offline-sync.js?v={{ app_version }}" defer></script>
+  <script src="/floki-offline/assets/offline-page.js?v={{ app_version }}" defer></script>
+</body>
+</html>

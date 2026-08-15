@@ -269,8 +269,6 @@ select { color-scheme: dark; }
 .button-row, .heading-actions, .actions, .section-link-group { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; }
 .section-link-group a { color: var(--violet-soft); font-size: .75rem; font-weight: 800; }
 .tiny-danger { min-height: 32px; padding: 6px 9px; border: 1px solid rgba(255,101,125,.25); border-radius: 9px; color: #ff8b9e; background: rgba(255,101,125,.06); cursor: pointer; }
-.movement-admin-actions { display:flex; flex-wrap:wrap; gap:6px; align-items:center; justify-content:flex-end; }
-.movement-admin-actions form { margin:0; }
 
 /* Flash */
 .flash-stack { position: fixed; z-index: 200; top: 88px; right: 18px; display: grid; gap: 8px; width: min(360px, calc(100% - 36px)); }
@@ -1641,3 +1639,39 @@ body.app-page .admin-quick-tabs {
   .settings-close-cash-layout { grid-template-columns: 1fr; }
   .settings-close-cash-action, .settings-close-button { width: 100%; min-width: 0; }
 }
+
+
+/* v2.10.3 · iPhone/iPad render seguro para el módulo aislado. */
+body.offline-operations-page {
+  min-height: 100vh !important;
+  background: #050508 !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+body.offline-operations-page::before,
+body.offline-operations-page .ambient {
+  display: none !important;
+  filter: none !important;
+  -webkit-filter: none !important;
+  mask-image: none !important;
+  -webkit-mask-image: none !important;
+}
+body.offline-operations-page .offline-shell {
+  opacity: 1 !important;
+  visibility: visible !important;
+  transform: none !important;
+  -webkit-transform: none !important;
+}
+body.offline-operations-page .card,
+body.offline-operations-page .offline-header,
+body.offline-operations-page .offline-event,
+body.offline-operations-page .offline-queue-summary,
+body.offline-operations-page .offline-footer {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  background: #111017 !important;
+  box-shadow: 0 10px 30px rgba(0,0,0,.34) !important;
+  transform: none !important;
+  -webkit-transform: none !important;
+}
+body.offline-operations-page .offline-brand img { filter: none !important; -webkit-filter: none !important; }

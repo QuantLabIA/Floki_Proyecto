@@ -78,10 +78,18 @@
       </div>
       <strong class="movement-amount">{% if movement['movement_type']=='expense' %}−{% endif %}{{ movement['total']|money }}</strong>
       {% if not movement['voided'] %}
-      <form action="{{ url_for('void_movement', movement_id=movement['id']) }}" method="post" data-confirm="¿Anular este movimiento antes de cerrar la caja?">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="reason" value="Anulado desde cierre de caja">
-        <button class="tiny-danger" type="submit">Anular</button>
-      </form>
+      <div class="movement-admin-actions">
+        <form action="{{ url_for('void_movement', movement_id=movement['id']) }}" method="post" data-confirm="¿Anular este movimiento antes de cerrar la caja? Quedará visible como ANULADO y no contará.">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="reason" value="Anulado desde cierre de caja">
+          <button class="tiny-danger" type="submit">Anular</button>
+        </form>
+        {% if movement['sector']=='beverages' and movement['movement_type']=='sale' %}
+        <form action="{{ url_for('delete_beverage_movement', movement_id=movement['id']) }}" method="post" data-confirm="¿Borrar esta bebida de la lista? Desaparecerá del reporte del evento abierto y no contará.">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button class="tiny-danger" type="submit">Borrar</button>
+        </form>
+        {% endif %}
+      </div>
       {% endif %}
     </div>
     {% else %}<p class="muted">No hay movimientos registrados.</p>{% endfor %}

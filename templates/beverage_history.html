@@ -61,7 +61,7 @@
           <strong>{{ movement['beverage_name'] or movement['description'] or category_labels.get(movement['category'], movement['category']) }} × {{ movement['quantity'] }}</strong>
           <small>
             {{ movement['created_at']|datetime_report_ar }} · {{ movement['user_name'] }}
-            {% if movement['category']=='rrpp_benefit' %} · Voucher RRPP{% elif movement['category']=='birthday_benefit' %} · Beneficio cumpleaños{% elif movement['category']=='birthday_discount' %} · 50% cumpleaños{% endif %}
+            {% if movement['category']=='drink_zero' %} · Speed $0 incluido con Champagne{% elif movement['category']=='rrpp_benefit' %} · Voucher RRPP{% elif movement['category']=='birthday_benefit' %} · Beneficio cumpleaños{% elif movement['category']=='birthday_discount' %} · 50% cumpleaños{% endif %}
           </small>
         </div>
         <div class="beverage-history-amount">
@@ -127,13 +127,19 @@
           <small>
             {{ movement['event_date']|date_ar }} · {{ movement['event_name'] }} · {{ movement['created_at']|datetime_report_ar }}
             · {{ movement['user_name'] }}
-            {% if movement['category']=='rrpp_benefit' %} · Voucher RRPP{% elif movement['category']=='birthday_benefit' %} · Beneficio cumpleaños{% elif movement['category']=='birthday_discount' %} · 50% cumpleaños{% endif %}
+            {% if movement['category']=='drink_zero' %} · Speed $0 incluido con Champagne{% elif movement['category']=='rrpp_benefit' %} · Voucher RRPP{% elif movement['category']=='birthday_benefit' %} · Beneficio cumpleaños{% elif movement['category']=='birthday_discount' %} · 50% cumpleaños{% endif %}
           </small>
         </div>
         <div class="beverage-history-amount">
           <strong>{{ movement['total']|money }}</strong>
           <small>{% if movement['voided'] %}ANULADA{% elif movement['total']|float == 0 %}BENEFICIO{% else %}VENTA{% endif %}</small>
         </div>
+        {% if not movement['voided'] and movement['event_status']=='open' %}
+        <div class="movement-admin-actions">
+          <form action="{{ url_for('void_movement', movement_id=movement['id']) }}" method="post" data-confirm="¿Anular esta bebida? Quedará visible como ANULADA y no contará."><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="reason" value="Anulada desde historial de bebidas"><button class="tiny-danger" type="submit">Anular</button></form>
+          <form action="{{ url_for('delete_beverage_movement', movement_id=movement['id']) }}" method="post" data-confirm="¿Borrar esta bebida de la lista? Desaparecerá del evento abierto y no contará."><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="tiny-danger" type="submit">Borrar</button></form>
+        </div>
+        {% endif %}
       </div>
       {% endfor %}
     {% else %}

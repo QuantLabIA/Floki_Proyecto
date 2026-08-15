@@ -68,12 +68,12 @@ DATA_DIR = BASE_DIR / "data"
 BACKUP_DIR = BASE_DIR / "backups"
 DATABASE = DATA_DIR / "floki.db"
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
-APP_VERSION = "2.10.4"
+APP_VERSION = "2.10.6"
 ARGENTINA_TZ = ZoneInfo("America/Argentina/Buenos_Aires")
 
 PAYMENT_METHODS = {"cash", "mercadopago", "transfer", "debit", "credit", "other"}
 # Las categorías advance/vip se conservan únicamente para leer eventos históricos.
-SALE_CATEGORIES = {"general", "drink", "drink_special", "rrpp_benefit", "birthday_benefit", "birthday_discount", "cloakroom", "other"}
+SALE_CATEGORIES = {"general", "drink", "drink_zero", "drink_special", "rrpp_benefit", "birthday_benefit", "birthday_discount", "cloakroom", "other"}
 ENTRY_CATEGORIES = {"general", "free"}
 HISTORICAL_ENTRY_CATEGORIES = {"general", "advance", "vip", "free"}
 PRICE_STEP = 1000
@@ -132,6 +132,7 @@ CATEGORY_LABELS = {
     "advance": "Anticipada",
     "vip": "VIP",
     "drink": "Consumición",
+    "drink_zero": "SPEED $0 · INCLUIDO CON CHAMPAGNE",
     "drink_special": "Bebida especial",
     "rrpp_benefit": "BENEFICIO RRPP",
     "birthday_benefit": "BENEFICIO CUMPLEAÑOS",
@@ -190,6 +191,7 @@ def add_security_headers(response):
     offline_shell = (
         request.path in {"/offline", "/service-worker.js", "/manifest.webmanifest"}
         or request.path.startswith("/offline-app/")
+        or request.path.startswith("/floki-offline/")
         or request.path.startswith("/static/")
     )
     # HTML dinámico, login y datos privados nunca deben persistirse en la caché de la PWA.
@@ -384,6 +386,8 @@ def group_beverages(rows, *, product_ranking=None, category_ranking=None, sold_c
         label = infer_beverage_category(item.get("beverage_type"), item.get("brand"), item.get("sale_unit"), item.get("name"))
         item["sold_count"] = int(sold_counts.get(item.get("id"), 0) or 0)
         item["previous_sold_count"] = int(product_ranking.get(item.get("id"), 0) or 0)
+        speed_text = " ".join(str(item.get(key) or "") for key in ("beverage_type", "brand", "name")).casefold()
+        item["is_speed"] = "speed" in speed_text
         grouped[label].append(item)
     for label in grouped:
         grouped[label].sort(key=lambda row: (-int(row.get("previous_sold_count", 0)), str(row.get("name") or "").casefold()))
@@ -1164,9 +1168,9 @@ def init_db():
         db.execute("UPDATE cash_sessions SET event_date=date(opened_at) WHERE event_date IS NULL OR trim(event_date)='' ")
         db.execute("UPDATE users SET sector='all' WHERE role='admin'")
         db.execute("UPDATE users SET sector='ticketing' WHERE role='cashier' AND sector NOT IN ('ticketing','beverages')")
-        db.execute("UPDATE movements SET sector='beverages' WHERE category IN ('drink','drink_special','rrpp_benefit','birthday_benefit','birthday_discount','champagne_speed')")
+        db.execute("UPDATE movements SET sector='beverages' WHERE category IN ('drink','drink_zero','drink_special','rrpp_benefit','birthday_benefit','birthday_discount','champagne_speed')")
         db.execute("UPDATE movements SET sector='ticketing' WHERE category IN ('general','advance','vip','free')")
-        db.execute("UPDATE movements SET sector='admin' WHERE category NOT IN ('general','advance','vip','free','drink','drink_special','rrpp_benefit','birthday_benefit','birthday_discount','champagne_speed') OR movement_type='expense'")
+        db.execute("UPDATE movements SET sector='admin' WHERE category NOT IN ('general','advance','vip','free','drink','drink_zero','drink_special','rrpp_benefit','birthday_benefit','birthday_discount','champagne_speed') OR movement_type='expense'")
         db.execute("UPDATE beverage_products SET stock_unit='unidad' WHERE stock_unit IS NULL OR trim(stock_unit)=''")
         db.execute("UPDATE beverage_products SET sale_unit='unidad' WHERE sale_unit IS NULL OR trim(sale_unit)=''")
         db.execute("UPDATE beverage_products SET servings_per_stock_unit=1")
@@ -1181,7 +1185,7 @@ def init_db():
         db.execute("UPDATE beverage_products SET stock_unit='botella', sale_unit='botella', servings_per_stock_unit=1 WHERE name='Agua' AND stock_unit='unidad' AND sale_unit='unidad'")
         db.execute("UPDATE beverage_products SET stock_unit='lata', sale_unit='lata', servings_per_stock_unit=1 WHERE name='Energizante' AND stock_unit='unidad' AND sale_unit='unidad'")
         db.execute("UPDATE beverage_products SET stock_unit='botella', sale_unit='vaso', servings_per_stock_unit=1 WHERE name='Trago' AND stock_unit='unidad' AND sale_unit='unidad'")
-        db.execute("UPDATE movements SET stock_units=quantity WHERE beverage_product_id IS NOT NULL AND (stock_units IS NULL OR stock_units=0) AND category IN ('drink','drink_special','rrpp_benefit','birthday_benefit','birthday_discount')")
+        db.execute("UPDATE movements SET stock_units=quantity WHERE beverage_product_id IS NOT NULL AND (stock_units IS NULL OR stock_units=0) AND category IN ('drink','drink_zero','drink_special','rrpp_benefit','birthday_benefit','birthday_discount')")
 
         for beverage in db.execute("SELECT * FROM beverage_products ORDER BY id").fetchall():
             sale_unit = beverage["sale_unit"] or "unidad"
@@ -1196,7 +1200,7 @@ def init_db():
             db.execute("UPDATE beverage_products SET approx_yield=? WHERE id=?", (automatic_yield, beverage["id"]))
             if automatic_yield > 0:
                 db.execute(
-                    "UPDATE movements SET stock_units=(quantity * 1.0) / ? WHERE beverage_product_id=? AND category IN ('drink','drink_special','rrpp_benefit','birthday_benefit','birthday_discount')",
+                    "UPDATE movements SET stock_units=(quantity * 1.0) / ? WHERE beverage_product_id=? AND category IN ('drink','drink_zero','drink_special','rrpp_benefit','birthday_benefit','birthday_discount')",
                     (automatic_yield, beverage["id"]),
                 )
 
@@ -1322,6 +1326,18 @@ def current_sector():
 
 @app.before_request
 def load_logged_in_user_and_csrf():
+    # Las rutas de recuperación/shell offline deben poder responder aunque la sesión o la DB
+    # tengan un problema. No contienen datos privados; los datos operativos llegan por API autenticada.
+    public_offline_shell = (
+        request.path.startswith("/floki-offline/")
+        or request.path in {"/floki-offline-test", "/floki-offline-reset", "/offline-recover"}
+    )
+    if public_offline_shell:
+        g.user = None
+        if "csrf_token" not in session:
+            session["csrf_token"] = secrets.token_hex(24)
+        return None
+
     user_id = session.get("user_id")
     g.user = get_db().execute("SELECT * FROM users WHERE id = ? AND active = 1", (user_id,)).fetchone() if user_id else None
     if "csrf_token" not in session:
@@ -1463,7 +1479,7 @@ def session_totals(cash_session_id):
             COALESCE(SUM(CASE WHEN movement_type='sale' AND category IN ('drink','drink_special','birthday_discount') AND voided=0 THEN quantity ELSE 0 END), 0) AS paid_beverage_count,
             COALESCE(SUM(CASE WHEN movement_type='sale' AND category IN ('general','advance','vip','drink','drink_special','birthday_discount') AND voided=0 THEN quantity ELSE 0 END), 0) AS ticket_count,
             COALESCE(SUM(CASE WHEN movement_type='sale' AND category IN ('general','advance','vip','free') AND voided=0 THEN quantity ELSE 0 END), 0) AS people_count,
-            COALESCE(SUM(CASE WHEN movement_type='sale' AND category IN ('drink','drink_special','rrpp_benefit','birthday_benefit','birthday_discount') AND voided=0 THEN quantity ELSE 0 END), 0) AS drink_count,
+            COALESCE(SUM(CASE WHEN movement_type='sale' AND category IN ('drink','drink_zero','drink_special','rrpp_benefit','birthday_benefit','birthday_discount') AND voided=0 THEN quantity ELSE 0 END), 0) AS drink_count,
             COALESCE(SUM(CASE WHEN movement_type='sale' AND category='rrpp_benefit' AND voided=0 THEN quantity ELSE 0 END), 0) AS rrpp_benefit_count,
             COALESCE(SUM(CASE WHEN movement_type='sale' AND category='cloakroom' AND voided=0 THEN quantity ELSE 0 END), 0) AS cloakroom_count,
             COALESCE(COUNT(CASE WHEN voided=0 THEN 1 END), 0) AS movement_count
@@ -1587,7 +1603,7 @@ def event_stock_rows(cash_session_id):
                               AND m.voided=0 AND m.category IN ('drink_special','birthday_discount')), 0) AS special_quantity,
                   COALESCE((SELECT SUM(m.quantity) FROM movements m
                             WHERE m.cash_session_id=bs.cash_session_id AND m.beverage_product_id=bs.beverage_id
-                              AND m.voided=0 AND m.category IN ('rrpp_benefit','birthday_benefit')), 0) AS benefit_quantity,
+                              AND m.voided=0 AND m.category IN ('drink_zero','rrpp_benefit','birthday_benefit')), 0) AS benefit_quantity,
                   COALESCE((SELECT SUM(m.stock_units) FROM movements m
                             WHERE m.cash_session_id=bs.cash_session_id AND m.beverage_product_id=bs.beverage_id
                               AND m.voided=0 AND m.movement_type='sale'), 0)
@@ -2043,7 +2059,7 @@ def perform_quick_sale(db, cash, user, payload, *, created_at=None):
         sector = user["sector"] or "ticketing"
         allowed = {
             "ticketing": {"entry", "ticketing_product"},
-            "beverages": {"beverage", "special_beverage", "rrpp_benefit", "birthday_discount"},
+            "beverages": {"beverage", "beverage_zero", "special_beverage", "rrpp_benefit", "birthday_discount"},
         }
         if sale_kind not in allowed.get(sector, set()):
             raise PermissionError("Tu usuario no tiene acceso a esa operación")
@@ -2081,7 +2097,7 @@ def perform_quick_sale(db, cash, user, payload, *, created_at=None):
         promoter_id = int(promoter_value) if promoter_value else None
         if promoter_id and not db.execute("SELECT id FROM promoters WHERE id=? AND active=1", (promoter_id,)).fetchone():
             raise ValueError("Promotor inválido")
-    elif sale_kind in {"beverage", "special_beverage", "rrpp_benefit", "birthday_discount"}:
+    elif sale_kind in {"beverage", "beverage_zero", "special_beverage", "rrpp_benefit", "birthday_discount"}:
         product_id = positive_int(payload.get("beverage_id"), "La bebida", maximum=100000)
         product = db.execute("SELECT * FROM beverage_products WHERE id=? AND active=1", (product_id,)).fetchone()
         if not product:
@@ -2093,6 +2109,14 @@ def perform_quick_sale(db, cash, user, payload, *, created_at=None):
             category = "drink"
             unit_price = float(product["price"])
             description = f"{product['name']} · {sale_unit}"
+        elif sale_kind == "beverage_zero":
+            speed_text = " ".join(str(product[key] or "") for key in ("beverage_type", "brand", "name")).casefold()
+            if "speed" not in speed_text:
+                raise ValueError("La opción $0 está reservada para Speed incluido con Champagne")
+            category = "drink_zero"
+            unit_price = 0.0
+            description = f"SPEED $0 · INCLUIDO CON CHAMPAGNE · {product['name']} · {sale_unit}"
+            payment_method = "other"
         elif sale_kind == "special_beverage":
             category = "drink_special"
             unit_price = beverage_price_from_option(payload.get("special_price"), allow_zero=False)
@@ -2142,8 +2166,8 @@ def perform_quick_sale(db, cash, user, payload, *, created_at=None):
     else:
         raise ValueError("Acción rápida inválida")
 
-    movement_sector = "beverages" if sale_kind in {"beverage", "special_beverage", "rrpp_benefit", "birthday_discount"} else "ticketing"
-    total = 0 if sale_kind == "rrpp_benefit" else round(unit_price * quantity, 2)
+    movement_sector = "beverages" if sale_kind in {"beverage", "beverage_zero", "special_beverage", "rrpp_benefit", "birthday_discount"} else "ticketing"
+    total = 0 if sale_kind in {"rrpp_benefit", "beverage_zero"} else round(unit_price * quantity, 2)
     cursor = db.execute(
         """
         INSERT INTO movements(cash_session_id, movement_type, category, sector, description, quantity, unit_price, total, payment_method, created_at, created_by, promoter_id, beverage_product_id, stock_units)
@@ -2153,6 +2177,7 @@ def perform_quick_sale(db, cash, user, payload, *, created_at=None):
     )
     messages = {
         "rrpp_benefit": f"Voucher RRPP registrado: {product['name']} × 1. Valor $0; se descontó una consumición del stock.",
+        "beverage_zero": f"Speed $0 registrado: {product['name']} × {quantity}. No suma recaudación y sí descuenta stock.",
         "special_beverage": f"Bebida especial registrada y asignada al stock de {product['name']}.",
         "birthday_discount": f"50% OFF de cumpleaños aplicado: {product['name']} × {quantity}.",
     }
@@ -2290,6 +2315,52 @@ def void_movement(movement_id):
     db.execute("DELETE FROM guest_checkins WHERE movement_id=?", (movement_id,))
     db.commit()
     flash("Movimiento anulado. Permanece visible en el historial.", "success")
+    return redirect(request.referrer or url_for("dashboard"))
+
+
+@app.post("/movements/<int:movement_id>/delete")
+@admin_required
+def delete_beverage_movement(movement_id):
+    """Borra una bebida del listado operativo sin dejarla computando.
+
+    A diferencia de Anular, esta acción elimina el movimiento visible. Solo se
+    permite para movimientos de bebidas del evento que todavía está abierto.
+    El stock vuelve a calcularse automáticamente porque el movimiento deja de
+    participar de las consultas de consumo.
+    """
+    db = get_db()
+    movement = db.execute(
+        """SELECT m.*, cs.status AS cash_status
+             FROM movements m
+             JOIN cash_sessions cs ON cs.id=m.cash_session_id
+             WHERE m.id=?""",
+        (movement_id,),
+    ).fetchone()
+    if not movement:
+        abort(404)
+    if movement["sector"] != "beverages" or movement["movement_type"] != "sale":
+        flash("Solo se puede borrar de la lista un movimiento de bebidas.", "error")
+        return redirect(request.referrer or url_for("dashboard"))
+    if movement["cash_status"] != "open":
+        flash("Un evento cerrado conserva su auditoría. Podés anular, pero no borrar movimientos de la lista.", "error")
+        return redirect(request.referrer or url_for("beverage_history"))
+    if movement["category"] == "champagne_speed":
+        flash("Ese registro histórico pertenece a un combo antiguo y no se puede borrar por separado.", "error")
+        return redirect(request.referrer or url_for("dashboard"))
+
+    # Eliminar componentes/ajustes dependientes antes del movimiento principal.
+    linked_ids = [row["id"] for row in db.execute(
+        "SELECT id FROM movements WHERE linked_movement_id=?", (movement_id,)
+    ).fetchall()]
+    for linked_id in linked_ids:
+        db.execute("DELETE FROM guest_checkins WHERE movement_id=?", (linked_id,))
+        db.execute("DELETE FROM beverage_stock_adjustments WHERE parent_movement_id=?", (linked_id,))
+    db.execute("DELETE FROM movements WHERE linked_movement_id=?", (movement_id,))
+    db.execute("DELETE FROM guest_checkins WHERE movement_id=?", (movement_id,))
+    db.execute("DELETE FROM beverage_stock_adjustments WHERE parent_movement_id=?", (movement_id,))
+    db.execute("DELETE FROM movements WHERE id=?", (movement_id,))
+    db.commit()
+    flash("Bebida borrada de la lista. No cuenta en ventas, beneficios, stock consumido ni reporte.", "success")
     return redirect(request.referrer or url_for("dashboard"))
 
 
@@ -3590,7 +3661,7 @@ def beverage_history():
         clauses.append("m.total>0")
     elif kind == "benefit":
         clauses.append("m.total=0")
-        clauses.append("m.category IN ('rrpp_benefit','birthday_benefit')")
+        clauses.append("m.category IN ('drink_zero','rrpp_benefit','birthday_benefit')")
     elif kind == "voided":
         clauses.append("m.voided=1")
     else:
@@ -4160,6 +4231,7 @@ def offline_bootstrap_payload():
                 "presentation": row["presentation"],
                 "sold_count": int(row.get("sold_count", 0) or 0),
                 "previous_sold_count": int(row.get("previous_sold_count", 0) or 0),
+                "is_speed": bool(row.get("is_speed")),
                 "category": infer_beverage_category(row.get("beverage_type"), row.get("brand"), row.get("sale_unit"), row.get("name")),
             }
             for row in ordered_beverages
@@ -4304,6 +4376,68 @@ def offline_sync():
         "retry": sum(1 for row in results if row["status"] == "retry"),
     }
     return jsonify({"ok": True, "results": results, "summary": summary, "bootstrap": offline_bootstrap_payload()})
+
+
+@app.get("/floki-offline/")
+def floki_offline_app():
+    # v2.10.6: se mantiene el namespace aislado para escapar de Service Workers/cachés antiguos de /offline-app/.
+    response = render_template("floki_offline.html")
+    response = Response(response, mimetype="text/html")
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
+
+
+@app.get("/floki-offline/assets/<path:asset_name>")
+def floki_offline_asset(asset_name):
+    allowed = {
+        "offline-sync.js": "offline-sync.js",
+        "offline-page.js": "offline-page.js",
+        "icon-192.png": "icon-192.png",
+        "icon-512.png": "icon-512.png",
+        "floki-logo-white.png": "floki-logo-white.png",
+    }
+    filename = allowed.get(asset_name)
+    if not filename:
+        abort(404)
+    mimetype = "application/javascript" if filename.endswith(".js") else None
+    response = send_from_directory(BASE_DIR / "static" / "floki_offline", filename, mimetype=mimetype)
+    response.headers["Cache-Control"] = "no-store" if filename.endswith(".js") else "public, max-age=3600"
+    return response
+
+
+@app.get("/floki-offline/manifest.webmanifest")
+def floki_offline_manifest():
+    response = send_from_directory(BASE_DIR / "static" / "floki_offline", "manifest.webmanifest", mimetype="application/manifest+json")
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.get("/floki-offline/service-worker.js")
+def floki_offline_service_worker():
+    response = send_from_directory(BASE_DIR / "static" / "floki_offline", "service-worker.js", mimetype="application/javascript")
+    response.headers["Service-Worker-Allowed"] = "/floki-offline/"
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+    return response
+
+
+@app.get("/floki-offline-test")
+def floki_offline_test():
+    # Ruta deliberadamente sin JS/CSS: sirve para comprobar la versión desplegada en Railway antes de probar la PWA.
+    html = f"""<!doctype html><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><body style='background:#050508;color:#fff;font:16px -apple-system,BlinkMacSystemFont,system-ui;padding:28px'><h1>Floki Offline OK</h1><p>Versión {APP_VERSION}</p><p>Si ves esto, Railway está sirviendo el código nuevo y esta ruta no depende de Service Worker.</p><p><a style='color:#d39aff' href='/floki-offline/?fresh=1'>Abrir Floki Offline</a></p></body>"""
+    response = Response(html, mimetype="text/html")
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    return response
+
+
+@app.get("/floki-offline-reset")
+def floki_offline_reset():
+    # Fuera del scope nuevo y viejo. Desregistra workers offline sin borrar IndexedDB/ventas pendientes.
+    html = """<!doctype html><html lang='es'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Floki · Reset offline</title><style>*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:#050508;color:#fff;font-family:-apple-system,BlinkMacSystemFont,system-ui;padding:24px}.box{max-width:680px;border:1px solid #2c2636;border-radius:18px;padding:24px;background:#111017}a{color:#d39aff}</style></head><body><main class='box'><h1>Reparando Floki Offline…</h1><p id='s'>Quitando Service Workers y cachés viejas. No se borra IndexedDB.</p><p><a href='/floki-offline-test'>Comprobar versión</a></p></main><script>(async()=>{try{if('serviceWorker'in navigator){const rs=await navigator.serviceWorker.getRegistrations();await Promise.all(rs.filter(r=>{try{const p=new URL(r.scope).pathname;return p.startsWith('/offline-app/')||p.startsWith('/floki-offline/')||p==='/';}catch(_){return false;}}).map(r=>r.unregister()));}if('caches'in window){const ks=await caches.keys();await Promise.all(ks.filter(k=>k.startsWith('floki-offline-')||k.startsWith('floki-offline-app-')||k.startsWith('floki-manager-')).map(k=>caches.delete(k)));}document.getElementById('s').textContent='Listo. No se borraron las operaciones guardadas en IndexedDB.';}catch(e){document.getElementById('s').textContent='Limpieza parcial. Podés continuar con la prueba de versión.';}})();</script></body></html>"""
+    response = Response(html, mimetype="text/html")
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    return response
 
 
 @app.get("/offline-app/")
@@ -4470,7 +4604,7 @@ def diagnostic():
         "offline_safe_stage": 3,
         "offline_temporarily_disabled": False,
         "offline_mode": "isolated",
-        "offline_scope": "/offline-app/",
+        "offline_scope": "/floki-offline/",
     }), (200 if ok else 500)
 
 

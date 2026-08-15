@@ -9,7 +9,7 @@
   const BOOTSTRAP_KEY = 'bootstrap';
   const DEVICE_KEY = 'floki-device-id';
   const SUPPORTED_QUICK_KINDS = new Set([
-    'entry', 'ticketing_product', 'beverage', 'special_beverage',
+    'entry', 'ticketing_product', 'beverage', 'beverage_zero', 'special_beverage',
     'rrpp_benefit', 'birthday_discount',
   ]);
 

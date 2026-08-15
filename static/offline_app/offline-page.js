@@ -128,8 +128,13 @@
     const payment = operationArea.querySelector('[data-offline-payment]');
     const quantity = operationArea.querySelector('[data-offline-quantity]');
     const buttons = operationArea.querySelector('[data-offline-beverage-buttons]');
-    buttons.innerHTML = products.map((product) => `<button type="button" class="quick-sale-button beverage-button" data-offline-beverage-id="${product.id}"><span>${window.FlokiOffline.escapeHtml(product.name)}</span><strong>${money(product.price)}</strong><small>${window.FlokiOffline.escapeHtml(product.sale_unit)}</small></button>`).join('');
+    buttons.innerHTML = products.map((product) => {
+      const paid = `<button type="button" class="quick-sale-button beverage-button" data-offline-beverage-id="${product.id}"><span>${window.FlokiOffline.escapeHtml(product.name)}</span><strong>${money(product.price)}</strong><small>${window.FlokiOffline.escapeHtml(product.sale_unit)}</small></button>`;
+      const zero = product.is_speed ? `<button type="button" class="quick-sale-button beverage-button benefit-action" data-offline-speed-zero="${product.id}"><span>${window.FlokiOffline.escapeHtml(product.name)} · CHAMPAGNE</span><strong>$0</strong><small>Incluido · descuenta stock</small></button>` : '';
+      return paid + zero;
+    }).join('');
     buttons.querySelectorAll('[data-offline-beverage-id]').forEach((button) => button.addEventListener('click', () => queueQuickSale({ sale_kind: 'beverage', beverage_id: button.dataset.offlineBeverageId, payment_method: payment.value, quantity: quantity.value })));
+    buttons.querySelectorAll('[data-offline-speed-zero]').forEach((button) => button.addEventListener('click', () => queueQuickSale({ sale_kind: 'beverage_zero', beverage_id: button.dataset.offlineSpeedZero, payment_method: 'other', quantity: quantity.value })));
     operationArea.querySelector('[data-offline-benefit]')?.addEventListener('click', () => queueQuickSale({ sale_kind: 'rrpp_benefit', beverage_id: operationArea.querySelector('[data-benefit-beverage]').value, beneficiary_comment: operationArea.querySelector('[data-benefit-comment]').value.trim(), quantity: 1, payment_method: 'other' }));
     operationArea.querySelector('[data-offline-special]')?.addEventListener('click', () => {
       const comment = operationArea.querySelector('[data-special-comment]').value.trim();
