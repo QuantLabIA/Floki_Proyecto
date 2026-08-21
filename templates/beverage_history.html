@@ -61,7 +61,7 @@
           <strong>{{ movement['beverage_name'] or movement['description'] or category_labels.get(movement['category'], movement['category']) }} × {{ movement['quantity'] }}</strong>
           <small>
             {{ movement['created_at']|datetime_report_ar }} · {{ movement['user_name'] }}
-            {% if movement['category']=='drink_zero' %} · Speed $0 incluido con Champagne{% elif movement['category']=='rrpp_benefit' %} · Voucher RRPP{% elif movement['category']=='birthday_benefit' %} · Beneficio cumpleaños{% elif movement['category']=='birthday_discount' %} · 50% cumpleaños{% endif %}
+            {% if movement['category']=='drink_promo' %} · Smirnoff al costo{% elif movement['category']=='drink_zero' %} · Speed $0 incluido con Champagne{% elif movement['category']=='rrpp_benefit' %} · Voucher RRPP{% elif movement['category']=='birthday_benefit' %} · Beneficio cumpleaños{% elif movement['category']=='birthday_discount' %} · 50% cumpleaños{% endif %}
           </small>
         </div>
         <div class="beverage-history-amount">
@@ -127,7 +127,7 @@
           <small>
             {{ movement['event_date']|date_ar }} · {{ movement['event_name'] }} · {{ movement['created_at']|datetime_report_ar }}
             · {{ movement['user_name'] }}
-            {% if movement['category']=='drink_zero' %} · Speed $0 incluido con Champagne{% elif movement['category']=='rrpp_benefit' %} · Voucher RRPP{% elif movement['category']=='birthday_benefit' %} · Beneficio cumpleaños{% elif movement['category']=='birthday_discount' %} · 50% cumpleaños{% endif %}
+            {% if movement['category']=='drink_promo' %} · Smirnoff al costo{% elif movement['category']=='drink_zero' %} · Speed $0 incluido con Champagne{% elif movement['category']=='rrpp_benefit' %} · Voucher RRPP{% elif movement['category']=='birthday_benefit' %} · Beneficio cumpleaños{% elif movement['category']=='birthday_discount' %} · 50% cumpleaños{% endif %}
           </small>
         </div>
         <div class="beverage-history-amount">

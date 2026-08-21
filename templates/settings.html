@@ -51,7 +51,7 @@
         {% endfor %}
       </div>
 
-      <div class="section-heading subsection-heading" id="bebidas"><div><p class="eyebrow">BEBIDAS</p><h2>Precios y catálogo de bebidas</h2><p class="muted compact-copy">Cada combinación de bebida, marca y presentación mantiene su precio normal. Para Speed, Floki agrega además un botón operativo $0 (incluido con Champagne) que usa el mismo producto físico: no suma recaudación, pero sí descuenta stock y aparece en el reporte completo.</p></div></div>
+      <div class="section-heading subsection-heading" id="bebidas"><div><p class="eyebrow">BEBIDAS</p><h2>Precios y catálogo de bebidas</h2><p class="muted compact-copy">Cada combinación mantiene su precio normal. Speed conserva su botón $0 incluido con Champagne. Para Smirnoff podés activar además una venta promocional “al costo” hasta las 03:00: usa el mismo stock físico y contabiliza por separado cuántas unidades se vendieron con descuento.</p></div></div>
       <div class="beverage-settings-list beverage-config-list grouped-beverage-settings">
         <div class="beverage-config-head with-approx-yield"><span>Variante</span><span>Precio</span><span>Stock físico</span><span>Venta</span><span>Rendimiento automático</span><span>Acción</span></div>
         {% for group in beverage_groups %}
@@ -65,6 +65,18 @@
           <span class="automatic-yield-pill">{% if beverage['approx_yield'] %}≈ {{ beverage['approx_yield'] }} {{ beverage['sale_unit'] }} / {{ beverage['stock_unit'] }}{% else %}Se calcula al guardar{% endif %}</span>
           <button class="tiny-danger" type="submit" formaction="{{ url_for('toggle_beverage', beverage_id=beverage['id']) }}" formmethod="post" data-confirm="¿Eliminar {{ beverage['name'] }} del catálogo activo? El historial anterior se conserva.">Eliminar</button>
         </div>
+        {% if beverage['is_smirnoff'] %}
+        <div class="smirnoff-promo-settings" style="margin:0 0 12px;padding:12px 14px;border:1px solid rgba(198,108,255,.28);border-radius:14px;display:flex;gap:12px;align-items:end;flex-wrap:wrap;">
+          <label style="min-width:170px;">Smirnoff al costo
+            <select name="promo_enabled_{{ beverage['id'] }}"><option value="0" {% if not beverage['promo_cost_enabled'] %}selected{% endif %}>Desactivado</option><option value="1" {% if beverage['promo_cost_enabled'] %}selected{% endif %}>Activado</option></select>
+          </label>
+          <label style="min-width:170px;">Precio promocional
+            <select name="promo_price_{{ beverage['id'] }}"><option value="0" {% if not beverage['promo_cost_price'] %}selected{% endif %}>Sin precio</option>{% for price in beverage_price_options if price > 0 %}<option value="{{ price }}" {% if price == beverage['promo_cost_price'] %}selected{% endif %}>{{ price|money }}</option>{% endfor %}</select>
+          </label>
+          <label style="min-width:150px;">Válido hasta<input type="time" name="promo_cutoff_{{ beverage['id'] }}" value="{{ beverage['promo_cost_cutoff'] or '03:00' }}"></label>
+          <small class="muted">La venta promocional descuenta el mismo stock de {{ beverage['name'] }} y aparece separada en movimientos y reporte.</small>
+        </div>
+        {% endif %}
         {% endfor %}
         {% else %}<p class="muted">Todavía no hay variantes de bebidas.</p>{% endfor %}
       </div>

@@ -68,12 +68,12 @@ DATA_DIR = BASE_DIR / "data"
 BACKUP_DIR = BASE_DIR / "backups"
 DATABASE = DATA_DIR / "floki.db"
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
-APP_VERSION = "2.10.8"
+APP_VERSION = "2.10.9"
 ARGENTINA_TZ = ZoneInfo("America/Argentina/Buenos_Aires")
 
 PAYMENT_METHODS = {"cash", "mercadopago", "transfer", "debit", "credit", "other"}
 # Las categorías advance/vip se conservan únicamente para leer eventos históricos.
-SALE_CATEGORIES = {"general", "drink", "drink_zero", "drink_special", "rrpp_benefit", "birthday_benefit", "birthday_discount", "cloakroom", "other"}
+SALE_CATEGORIES = {"general", "drink", "drink_promo", "drink_zero", "drink_special", "rrpp_benefit", "birthday_benefit", "birthday_discount", "cloakroom", "other"}
 ENTRY_CATEGORIES = {"general", "free"}
 HISTORICAL_ENTRY_CATEGORIES = {"general", "advance", "vip", "free"}
 PRICE_STEP = 1000
@@ -95,7 +95,7 @@ BEVERAGE_CATEGORY_OPTIONS = (
 BEVERAGE_TYPE_OPTIONS = (
     "Cerveza", "Fernet", "Vodka", "Gin", "Whisky", "Ron", "Gancia",
     "Tequila", "Aperitivo", "Licor", "Vino", "Espumante", "Energizante",
-    "Agua", "Gaseosa", "Trago preparado", "Otro",
+    "Agua", "Gaseosa", "Trago preparado", "Vale un trago", "Otro",
 )
 BEVERAGE_BRAND_OPTIONS = (
     "Sin marca", "Quilmes", "Brahma", "Andes Origen", "Schneider", "Imperial",
@@ -110,7 +110,7 @@ BEVERAGE_BRAND_OPTIONS = (
 BEVERAGE_PRESENTATION_OPTIONS = (
     "vaso", "vaso chico", "vaso grande 750 ml", "lata", "lata 250 ml", "lata 354 ml",
     "lata 473 ml", "botella", "botella 330 ml", "botella 500 ml", "botella 710 ml",
-    "botella 750 ml", "botella 1 l", "copa", "shot", "jarra", "balde", "unidad",
+    "botella 750 ml", "botella 1 l", "copa", "shot", "jarra", "balde", "vale", "unidad",
 )
 BEVERAGE_STOCK_UNIT_OPTIONS = ("botella", "lata", "caja", "pack", "barril", "bidón", "unidad")
 APPROX_YIELD_OPTIONS = tuple([0.0] + [step / 2 for step in range(2, 41)])  # 1 a 20 por unidad de stock
@@ -132,6 +132,7 @@ CATEGORY_LABELS = {
     "advance": "Anticipada",
     "vip": "VIP",
     "drink": "Consumición",
+    "drink_promo": "Smirnoff al costo",
     "drink_zero": "SPEED DE CHAMPAGNE $0",
     "drink_special": "Bebida especial",
     "rrpp_benefit": "BENEFICIO RRPP",
@@ -358,6 +359,8 @@ def infer_beverage_category(beverage_type=None, brand=None, sale_unit=None, name
         return "VODKA"
     if "whisky" in text or "whiskey" in text or any(token in text for token in ("johnnie", "chivas", "jack daniel", "jameson", "ballantine")):
         return "WHISKY"
+    if "vale un trago" in text or "vale" in text:
+        return "TRAGOS"
     if any(token in text for token in ("champagne", "espumante", "chandon")):
         return "CHAMPAGNE"
     # Los energizantes se muestran como grupo propio para que queden junto a Champagne
@@ -370,11 +373,12 @@ def infer_beverage_category(beverage_type=None, brand=None, sale_unit=None, name
     return "TRAGOS"
 
 
-def group_beverages(rows, *, product_ranking=None, category_ranking=None, sold_counts=None):
+def group_beverages(rows, *, product_ranking=None, category_ranking=None, sold_counts=None, promo_sold_counts=None):
     """Agrupa bebidas y permite priorizar lo más vendido del evento anterior."""
     product_ranking = product_ranking or {}
     category_ranking = category_ranking or {}
     sold_counts = sold_counts or {}
+    promo_sold_counts = promo_sold_counts or {}
     grouped = {label: [] for label in BEVERAGE_CATEGORY_OPTIONS}
     for row in rows:
         item = dict(row)
@@ -383,6 +387,9 @@ def group_beverages(rows, *, product_ranking=None, category_ranking=None, sold_c
         item["previous_sold_count"] = int(product_ranking.get(item.get("id"), 0) or 0)
         speed_text = " ".join(str(item.get(key) or "") for key in ("beverage_type", "brand", "name")).casefold()
         item["is_speed"] = "speed" in speed_text
+        item["is_smirnoff"] = "smirnoff" in speed_text
+        item["promo_sold_count"] = int(promo_sold_counts.get(item.get("id"), 0) or 0)
+        item["promo_active"] = bool(item.get("promo_cost_enabled")) and float(item.get("promo_cost_price") or 0) > 0 and night_promo_available(argentina_now(), item.get("promo_cost_cutoff") or "03:00")
         grouped[label].append(item)
     for label in grouped:
         grouped[label].sort(key=lambda row: (-int(row.get("previous_sold_count", 0)), str(row.get("name") or "").casefold()))
@@ -414,6 +421,32 @@ def beverage_paid_sales_by_product(cash_session_id):
         (cash_session_id,),
     ).fetchall()
     return {int(row["beverage_product_id"]): int(row["sold"] or 0) for row in rows}
+
+
+def beverage_promo_sales_by_product(cash_session_id):
+    if not cash_session_id:
+        return {}
+    rows = get_db().execute(
+        """SELECT beverage_product_id, COALESCE(SUM(quantity), 0) AS sold
+           FROM movements
+           WHERE cash_session_id=? AND movement_type='sale' AND sector='beverages'
+             AND voided=0 AND beverage_product_id IS NOT NULL AND category='drink_promo'
+           GROUP BY beverage_product_id""",
+        (cash_session_id,),
+    ).fetchall()
+    return {int(row["beverage_product_id"]): int(row["sold"] or 0) for row in rows}
+
+
+def night_promo_available(now_value=None, cutoff_text="03:00"):
+    """Promos nocturnas válidas desde la tarde/noche hasta el horario de corte."""
+    value = now_value or argentina_now()
+    try:
+        cutoff_h, cutoff_m = [int(part) for part in str(cutoff_text or "03:00").split(":", 1)]
+    except (ValueError, TypeError):
+        cutoff_h, cutoff_m = 3, 0
+    minutes = value.hour * 60 + value.minute
+    cutoff = cutoff_h * 60 + cutoff_m
+    return minutes >= 18 * 60 or minutes <= cutoff
 
 
 def previous_event_beverage_ranking(current_cash_session_id):
@@ -1127,6 +1160,9 @@ def init_db():
         add_column_if_missing(db, "beverage_products", "beverage_type", "TEXT NOT NULL DEFAULT 'Otro'")
         add_column_if_missing(db, "beverage_products", "brand", "TEXT NOT NULL DEFAULT 'Sin marca'")
         add_column_if_missing(db, "beverage_products", "presentation", "TEXT NOT NULL DEFAULT 'unidad'")
+        add_column_if_missing(db, "beverage_products", "promo_cost_price", "REAL NOT NULL DEFAULT 0")
+        add_column_if_missing(db, "beverage_products", "promo_cost_cutoff", "TEXT NOT NULL DEFAULT '03:00'")
+        add_column_if_missing(db, "beverage_products", "promo_cost_enabled", "INTEGER NOT NULL DEFAULT 0")
         add_column_if_missing(db, "promoters", "normalized_name", "TEXT")
         add_column_if_missing(db, "promoters", "is_common", "INTEGER NOT NULL DEFAULT 0")
         add_column_if_missing(db, "promoters", "is_promo", "INTEGER NOT NULL DEFAULT 0")
@@ -1145,9 +1181,9 @@ def init_db():
         db.execute("UPDATE cash_sessions SET event_date=date(opened_at) WHERE event_date IS NULL OR trim(event_date)='' ")
         db.execute("UPDATE users SET sector='all' WHERE role='admin'")
         db.execute("UPDATE users SET sector='ticketing' WHERE role='cashier' AND sector NOT IN ('ticketing','beverages')")
-        db.execute("UPDATE movements SET sector='beverages' WHERE category IN ('drink','drink_zero','drink_special','rrpp_benefit','birthday_benefit','birthday_discount','champagne_speed')")
+        db.execute("UPDATE movements SET sector='beverages' WHERE category IN ('drink','drink_promo','drink_zero','drink_special','rrpp_benefit','birthday_benefit','birthday_discount','champagne_speed')")
         db.execute("UPDATE movements SET sector='ticketing' WHERE category IN ('general','advance','vip','free')")
-        db.execute("UPDATE movements SET sector='admin' WHERE category NOT IN ('general','advance','vip','free','drink','drink_zero','drink_special','rrpp_benefit','birthday_benefit','birthday_discount','champagne_speed') OR movement_type='expense'")
+        db.execute("UPDATE movements SET sector='admin' WHERE category NOT IN ('general','advance','vip','free','drink','drink_promo','drink_zero','drink_special','rrpp_benefit','birthday_benefit','birthday_discount','champagne_speed') OR movement_type='expense'")
         db.execute("UPDATE beverage_products SET stock_unit='unidad' WHERE stock_unit IS NULL OR trim(stock_unit)=''")
         db.execute("UPDATE beverage_products SET sale_unit='unidad' WHERE sale_unit IS NULL OR trim(sale_unit)=''")
         db.execute("UPDATE beverage_products SET servings_per_stock_unit=1")
@@ -1162,7 +1198,7 @@ def init_db():
         db.execute("UPDATE beverage_products SET stock_unit='botella', sale_unit='botella', servings_per_stock_unit=1 WHERE name='Agua' AND stock_unit='unidad' AND sale_unit='unidad'")
         db.execute("UPDATE beverage_products SET stock_unit='lata', sale_unit='lata', servings_per_stock_unit=1 WHERE name='Energizante' AND stock_unit='unidad' AND sale_unit='unidad'")
         db.execute("UPDATE beverage_products SET stock_unit='botella', sale_unit='vaso', servings_per_stock_unit=1 WHERE name='Trago' AND stock_unit='unidad' AND sale_unit='unidad'")
-        db.execute("UPDATE movements SET stock_units=quantity WHERE beverage_product_id IS NOT NULL AND (stock_units IS NULL OR stock_units=0) AND category IN ('drink','drink_zero','drink_special','rrpp_benefit','birthday_benefit','birthday_discount')")
+        db.execute("UPDATE movements SET stock_units=quantity WHERE beverage_product_id IS NOT NULL AND (stock_units IS NULL OR stock_units=0) AND category IN ('drink','drink_promo','drink_zero','drink_special','rrpp_benefit','birthday_benefit','birthday_discount')")
 
         for beverage in db.execute("SELECT * FROM beverage_products ORDER BY id").fetchall():
             sale_unit = beverage["sale_unit"] or "unidad"
@@ -1177,7 +1213,7 @@ def init_db():
             db.execute("UPDATE beverage_products SET approx_yield=? WHERE id=?", (automatic_yield, beverage["id"]))
             if automatic_yield > 0:
                 db.execute(
-                    "UPDATE movements SET stock_units=(quantity * 1.0) / ? WHERE beverage_product_id=? AND category IN ('drink','drink_zero','drink_special','rrpp_benefit','birthday_benefit','birthday_discount')",
+                    "UPDATE movements SET stock_units=(quantity * 1.0) / ? WHERE beverage_product_id=? AND category IN ('drink','drink_promo','drink_zero','drink_special','rrpp_benefit','birthday_benefit','birthday_discount')",
                     (automatic_yield, beverage["id"]),
                 )
 
@@ -1236,6 +1272,7 @@ def init_db():
             ("Agua · Botella 500 Ml", 2000, "botella", "botella 500 ml", "Agua", "Sin marca", "botella 500 ml", 20),
             ("Energizante · Lata 250 Ml", 3000, "lata", "lata 250 ml", "Energizante", "Sin marca", "lata 250 ml", 30),
             ("Trago Preparado · Vaso", 6000, "botella", "vaso", "Trago preparado", "Sin marca", "vaso", 40),
+            ("Vale Un Trago · Vale", 1000, "unidad", "vale", "Vale un trago", "Sin marca", "vale", 45),
         ]
         for name, price, stock_unit, sale_unit, beverage_type, brand, presentation, sort_order in beverage_defaults:
             db.execute(
@@ -1441,10 +1478,10 @@ def session_totals(cash_session_id):
             COALESCE(SUM(CASE WHEN movement_type='expense' AND payment_method='cash' AND voided=0 THEN total ELSE 0 END), 0) AS cash_expenses,
             COALESCE(SUM(CASE WHEN movement_type='sale' AND category='free' AND voided=0 THEN quantity ELSE 0 END), 0) AS free_count,
             COALESCE(SUM(CASE WHEN movement_type='sale' AND category IN ('general','advance','vip') AND voided=0 THEN quantity ELSE 0 END), 0) AS paid_count,
-            COALESCE(SUM(CASE WHEN movement_type='sale' AND category IN ('drink','drink_special','birthday_discount') AND voided=0 THEN quantity ELSE 0 END), 0) AS paid_beverage_count,
-            COALESCE(SUM(CASE WHEN movement_type='sale' AND category IN ('general','advance','vip','drink','drink_special','birthday_discount') AND voided=0 THEN quantity ELSE 0 END), 0) AS ticket_count,
+            COALESCE(SUM(CASE WHEN movement_type='sale' AND category IN ('drink','drink_promo','drink_special','birthday_discount') AND voided=0 THEN quantity ELSE 0 END), 0) AS paid_beverage_count,
+            COALESCE(SUM(CASE WHEN movement_type='sale' AND category IN ('general','advance','vip','drink','drink_promo','drink_special','birthday_discount') AND voided=0 THEN quantity ELSE 0 END), 0) AS ticket_count,
             COALESCE(SUM(CASE WHEN movement_type='sale' AND category IN ('general','advance','vip','free') AND voided=0 THEN quantity ELSE 0 END), 0) AS people_count,
-            COALESCE(SUM(CASE WHEN movement_type='sale' AND category IN ('drink','drink_zero','drink_special','rrpp_benefit','birthday_benefit','birthday_discount') AND voided=0 THEN quantity ELSE 0 END), 0) AS drink_count,
+            COALESCE(SUM(CASE WHEN movement_type='sale' AND category IN ('drink','drink_promo','drink_zero','drink_special','rrpp_benefit','birthday_benefit','birthday_discount') AND voided=0 THEN quantity ELSE 0 END), 0) AS drink_count,
             COALESCE(SUM(CASE WHEN movement_type='sale' AND category='rrpp_benefit' AND voided=0 THEN quantity ELSE 0 END), 0) AS rrpp_benefit_count,
             COALESCE(SUM(CASE WHEN movement_type='sale' AND category='cloakroom' AND voided=0 THEN quantity ELSE 0 END), 0) AS cloakroom_count,
             COALESCE(COUNT(CASE WHEN voided=0 THEN 1 END), 0) AS movement_count
@@ -1565,7 +1602,7 @@ def event_stock_rows(cash_session_id):
                               AND m.voided=0 AND m.category='drink'), 0) AS regular_quantity,
                   COALESCE((SELECT SUM(m.quantity) FROM movements m
                             WHERE m.cash_session_id=bs.cash_session_id AND m.beverage_product_id=bs.beverage_id
-                              AND m.voided=0 AND m.category IN ('drink_special','birthday_discount')), 0) AS special_quantity,
+                              AND m.voided=0 AND m.category IN ('drink_promo','drink_special','birthday_discount')), 0) AS special_quantity,
                   COALESCE((SELECT SUM(m.quantity) FROM movements m
                             WHERE m.cash_session_id=bs.cash_session_id AND m.beverage_product_id=bs.beverage_id
                               AND m.voided=0 AND m.category IN ('drink_zero','rrpp_benefit','birthday_benefit')), 0) AS benefit_quantity,
@@ -1729,10 +1766,11 @@ def dashboard():
     beverage_groups = []
     if show_beverages:
         current_sold = beverage_paid_sales_by_product(cash["id"]) if cash else {}
+        promo_sold = beverage_promo_sales_by_product(cash["id"]) if cash else {}
         previous_product_sales, previous_category_sales = previous_event_beverage_ranking(cash["id"]) if cash else ({}, {})
         beverage_groups = group_beverages(
             beverages, product_ranking=previous_product_sales,
-            category_ranking=previous_category_sales, sold_counts=current_sold,
+            category_ranking=previous_category_sales, sold_counts=current_sold, promo_sold_counts=promo_sold,
         )
     ticketing_products = get_db().execute("SELECT * FROM ticketing_products WHERE active=1 ORDER BY sort_order, name COLLATE NOCASE").fetchall() if show_entries else []
     birthday_promoters = []
@@ -2024,7 +2062,7 @@ def perform_quick_sale(db, cash, user, payload, *, created_at=None):
         sector = user["sector"] or "ticketing"
         allowed = {
             "ticketing": {"entry", "ticketing_product"},
-            "beverages": {"beverage", "beverage_zero", "special_beverage", "rrpp_benefit", "birthday_discount"},
+            "beverages": {"beverage", "smirnoff_cost", "beverage_zero", "special_beverage", "rrpp_benefit", "birthday_discount"},
         }
         if sale_kind not in allowed.get(sector, set()):
             raise PermissionError("Tu usuario no tiene acceso a esa operación")
@@ -2038,7 +2076,7 @@ def perform_quick_sale(db, cash, user, payload, *, created_at=None):
     # Para agilizar Caja de Bebidas, toda venta paga de bebidas se registra
     # operativamente como efectivo. El Mercado Pago real se declara una sola
     # vez al cierre de la noche y no en cada consumición.
-    if sale_kind in {"beverage", "special_beverage", "birthday_discount"}:
+    if sale_kind in {"beverage", "smirnoff_cost", "special_beverage", "birthday_discount"}:
         payment_method = "cash"
     else:
         payment_method = str(payload.get("payment_method", "cash"))
@@ -2062,7 +2100,7 @@ def perform_quick_sale(db, cash, user, payload, *, created_at=None):
         promoter_id = int(promoter_value) if promoter_value else None
         if promoter_id and not db.execute("SELECT id FROM promoters WHERE id=? AND active=1", (promoter_id,)).fetchone():
             raise ValueError("Promotor inválido")
-    elif sale_kind in {"beverage", "beverage_zero", "special_beverage", "rrpp_benefit", "birthday_discount"}:
+    elif sale_kind in {"beverage", "smirnoff_cost", "beverage_zero", "special_beverage", "rrpp_benefit", "birthday_discount"}:
         product_id = positive_int(payload.get("beverage_id"), "La bebida", maximum=100000)
         product = db.execute("SELECT * FROM beverage_products WHERE id=? AND active=1", (product_id,)).fetchone()
         if not product:
@@ -2074,6 +2112,18 @@ def perform_quick_sale(db, cash, user, payload, *, created_at=None):
             category = "drink"
             unit_price = float(product["price"])
             description = f"{product['name']} · {sale_unit}"
+        elif sale_kind == "smirnoff_cost":
+            product_text = " ".join(str(product[key] or "") for key in ("beverage_type", "brand", "name")).casefold()
+            if "smirnoff" not in product_text:
+                raise ValueError("La promo al costo está reservada para Smirnoff")
+            if not int(product["promo_cost_enabled"] or 0) or float(product["promo_cost_price"] or 0) <= 0:
+                raise ValueError("La promoción Smirnoff al costo no está configurada")
+            cutoff = str(product["promo_cost_cutoff"] or "03:00")
+            if not night_promo_available(operation_dt, cutoff):
+                raise ValueError(f"Smirnoff al costo finalizó a las {cutoff}")
+            category = "drink_promo"
+            unit_price = float(product["promo_cost_price"])
+            description = f"SMIRNOFF AL COSTO · {product['name']} · {sale_unit}"
         elif sale_kind == "beverage_zero":
             speed_text = " ".join(str(product[key] or "") for key in ("beverage_type", "brand", "name")).casefold()
             if "speed" not in speed_text:
@@ -2131,7 +2181,7 @@ def perform_quick_sale(db, cash, user, payload, *, created_at=None):
     else:
         raise ValueError("Acción rápida inválida")
 
-    movement_sector = "beverages" if sale_kind in {"beverage", "beverage_zero", "special_beverage", "rrpp_benefit", "birthday_discount"} else "ticketing"
+    movement_sector = "beverages" if sale_kind in {"beverage", "smirnoff_cost", "beverage_zero", "special_beverage", "rrpp_benefit", "birthday_discount"} else "ticketing"
     total = 0 if sale_kind in {"rrpp_benefit", "beverage_zero"} else round(unit_price * quantity, 2)
     cursor = db.execute(
         """
@@ -2143,6 +2193,7 @@ def perform_quick_sale(db, cash, user, payload, *, created_at=None):
     messages = {
         "rrpp_benefit": f"Voucher RRPP registrado: {product['name']} × 1. Valor $0; se descontó una consumición del stock.",
         "beverage_zero": f"Speed $0 registrado: {product['name']} × {quantity}. No suma recaudación y sí descuenta stock.",
+        "smirnoff_cost": f"Smirnoff al costo registrado: {product['name']} × {quantity}. Descuenta el mismo stock físico.",
         "special_beverage": f"Bebida especial registrada y asignada al stock de {product['name']}.",
         "birthday_discount": f"50% OFF de cumpleaños aplicado: {product['name']} × {quantity}.",
     }
@@ -4000,7 +4051,15 @@ def update_prices():
                 if duplicate:
                     raise ValueError(f"Ya existe la variante {updated_name}")
                 approx_yield = suggested_approx_yield(stock_unit, sale_unit, beverage_type, brand, updated_name)
-                db.execute("UPDATE beverage_products SET name=?, price=?, stock_unit=?, sale_unit=?, presentation=?, servings_per_stock_unit=1, approx_yield=?, updated_at=? WHERE id=?", (updated_name, price, stock_unit, sale_unit, sale_unit, approx_yield, now_iso(), beverage["id"]))
+                is_smirnoff = "smirnoff" in " ".join(str(v or "") for v in (beverage_type, brand, updated_name)).casefold()
+                promo_enabled = 1 if is_smirnoff and request.form.get(f"promo_enabled_{beverage['id']}") == "1" else 0
+                promo_price = beverage_price_from_option(request.form.get(f"promo_price_{beverage['id']}", "0"), allow_zero=True) if is_smirnoff else 0
+                promo_cutoff = str(request.form.get(f"promo_cutoff_{beverage['id']}", "03:00")).strip() if is_smirnoff else "03:00"
+                if is_smirnoff and not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", promo_cutoff):
+                    raise ValueError("El horario de Smirnoff al costo no es válido")
+                if promo_enabled and promo_price <= 0:
+                    raise ValueError("Elegí un precio mayor a cero para Smirnoff al costo")
+                db.execute("UPDATE beverage_products SET name=?, price=?, stock_unit=?, sale_unit=?, presentation=?, servings_per_stock_unit=1, approx_yield=?, promo_cost_enabled=?, promo_cost_price=?, promo_cost_cutoff=?, updated_at=? WHERE id=?", (updated_name, price, stock_unit, sale_unit, sale_unit, approx_yield, promo_enabled, promo_price, promo_cutoff, now_iso(), beverage["id"]))
                 db.execute("UPDATE beverage_stock SET beverage_name=? WHERE beverage_id=?", (updated_name, beverage["id"]))
         db.commit()
         message = "Precio de entrada general, guardarropa y variantes de bebidas actualizados."

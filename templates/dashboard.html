@@ -196,6 +196,12 @@
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="sale_kind" value="beverage"><input type="hidden" name="beverage_id" value="{{ beverage['id'] }}"><input type="hidden" name="payment_method" value="cash"><input type="hidden" name="quantity" value="1" data-quick-quantity>
           <button type="submit" class="quick-sale-button beverage-button"><span>{{ beverage['name'] }}</span><strong>{{ beverage['price']|money }}</strong><small>{{ beverage['sale_unit']|title }} · vendidas hoy: {{ beverage['sold_count'] }}</small></button>
         </form>
+        {% if beverage['is_smirnoff'] and beverage['promo_cost_enabled'] and beverage['promo_cost_price'] > 0 %}
+        <form action="{{ url_for('register_quick_sale') }}" method="post" class="quick-sale-form" data-quick-form>
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="sale_kind" value="smirnoff_cost"><input type="hidden" name="beverage_id" value="{{ beverage['id'] }}"><input type="hidden" name="payment_method" value="cash"><input type="hidden" name="quantity" value="1" data-quick-quantity>
+          <button type="submit" class="quick-sale-button beverage-button promotion-action" {% if not beverage['promo_active'] %}disabled{% endif %}><span>SMIRNOFF AL COSTO · {{ beverage['sale_unit']|upper }}</span><strong>{{ beverage['promo_cost_price']|money }}</strong><small>{% if beverage['promo_active'] %}Promo hasta {{ beverage['promo_cost_cutoff'] }}{% else %}Promoción finalizada{% endif %} · vendidos con descuento: {{ beverage['promo_sold_count'] }}</small></button>
+        </form>
+        {% endif %}
         {% if beverage['is_speed'] %}
         <form action="{{ url_for('register_quick_sale') }}" method="post" class="quick-sale-form" data-quick-form>
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="sale_kind" value="beverage_zero"><input type="hidden" name="beverage_id" value="{{ beverage['id'] }}"><input type="hidden" name="payment_method" value="other"><input type="hidden" name="quantity" value="1" data-quick-quantity>
